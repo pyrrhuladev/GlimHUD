@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>GlimHUD</AssemblyName>
+    <RootNamespace>GlimHUD</RootNamespace>
+    <ApplicationIcon>Assets\GlimHUD.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.3.0</Version>
+    <Product>GlimHUD</Product>
+    <Description>Music and system telemetry above your game.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/pyrrhuladev/GlimHUD</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\GlimHUD.ico" />
+    <Resource Include="Assets\GlimHUD-tray.ico" />
+    <None Include="..\..\tools\PresentMon\PresentMon*.exe;..\..\tools\PresentMon\LICENSE.txt;..\..\tools\PresentMon\provenance.json;..\..\tools\PresentMon\README.md" Link="tools\PresentMon\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

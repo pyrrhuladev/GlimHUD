@@ -1,0 +1,23 @@
+**/bin/
+**/obj/
+.tools/
+.packages/
+artifacts/
+*.user
+*.suo
+.vs/
+.codex/
+NVIDIA Corporation/
+*.log
+*.dmp
+*.pfx
+*.p12
+*.key
+*.cer
+*.msix
+*.msixbundle
+*.msixupload
+.env
+.env.*
+!.env.example
+__pycache__/

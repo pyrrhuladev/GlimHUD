@@ -1,0 +1,14 @@
+<Solution>
+  <Project Path="src/GlimHUD/GlimHUD.csproj" />
+  <Folder Name="/Tests/">
+    <Project Path="tests/GlimHUD.Checks/GlimHUD.Checks.csproj" />
+    <Project Path="tests/GlimHUD.MediaChecks/GlimHUD.MediaChecks.csproj" />
+    <Project Path="tests/GlimHUD.AudioChecks/GlimHUD.AudioChecks.csproj" />
+    <Project Path="tests/GlimHUD.GameActivityChecks/GlimHUD.GameActivityChecks.csproj" />
+    <Project Path="tests/GlimHUD.InputChecks/GlimHUD.InputChecks.csproj" />
+    <Project Path="tests/GlimHUD.AccentChecks/GlimHUD.AccentChecks.csproj" />
+    <Project Path="tests/GlimHUD.OptionsChecks/GlimHUD.OptionsChecks.csproj" />
+    <Project Path="tests/GlimHUD.TelemetryChecks/GlimHUD.TelemetryChecks.csproj" />
+    <Project Path="tests/GlimHUD.LocalizationChecks/GlimHUD.LocalizationChecks.csproj" />
+  </Folder>
+</Solution>

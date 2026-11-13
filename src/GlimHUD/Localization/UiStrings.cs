@@ -1,0 +1,62 @@
+namespace GlimHUD.Localization;
+
+internal readonly record struct UiString(string Key, string English, string Russian);
+
+internal static class UiStrings
+{
+    internal static readonly UiString[] Entries =
+    [
+        new("Loc.SettingsTitle", "GlimHUD — Settings", "GlimHUD — Настройки"),
+        new("Loc.Tagline", "Everything you need, above your game", "Всё нужное — поверх игры"),
+        new("Loc.CloseSettings", "Close settings", "Закрыть настройки"),
+        new("Loc.Appearance", "Appearance", "Внешний вид"),
+        new("Loc.Language", "Language", "Язык"),
+        new("Loc.LanguageHint", "Changes apply immediately.", "Изменения применяются сразу."),
+        new("Loc.BackgroundOpacity", "Background opacity", "Непрозрачность подложки"),
+        new("Loc.OpacityHint", "See your game through the panel while text and buttons stay sharp.", "Игра видна сквозь панель. Текст и кнопки остаются чёткими."),
+        new("Loc.PanelScale", "Panel scale", "Масштаб панели"),
+        new("Loc.LockPanel", "Lock the panel and pass clicks through to the game", "Закрепить панель и пропускать клики в игру"),
+        new("Loc.AccentColor", "Accent color", "Акцентный цвет"),
+        new("Loc.UseWindowsAccent", "Use the Windows accent color", "Использовать акцентный цвет Windows"),
+        new("Loc.CustomColorHex", "Custom accent color in HEX format", "Свой акцентный цвет в формате HEX"),
+        new("Loc.ChooseColor", "Choose…", "Выбрать…"),
+        new("Loc.ColorError", "Enter a #RRGGBB color, for example #65DDF2.", "Укажите цвет в формате #RRGGBB, например #65DDF2."),
+        new("Loc.CustomColorHint", "Uncheck Windows to choose a custom color. Changes apply immediately.", "Или снимите флажок Windows и задайте свой цвет. Применяется сразу."),
+        new("Loc.Player", "Player", "Плеер"),
+        new("Loc.ShowPlayer", "Show the player", "Показывать плеер целиком"),
+        new("Loc.ShowPlayerHint", "Artwork, track information, controls and volume are hidden together.", "Обложка, название трека, кнопки и громкость скрываются вместе."),
+        new("Loc.ScrollVolume", "Scroll over the player to change volume", "Менять громкость колёсиком над плеером"),
+        new("Loc.ScrollVolumeHint", "Changes volume by 3%. Also works while the panel is locked.", "Шаг — 3%. Работает и при закреплённой панели."),
+        new("Loc.MusicSource", "Music source", "Источник музыки"),
+        new("Loc.VolumeApp", "Application for volume control", "Приложение для регулировки громкости"),
+        new("Loc.VolumeAppAccessible", "Application volume", "Приложение для громкости"),
+        new("Loc.AutoShow", "Show automatically in games", "Автопоказ в играх"),
+        new("Loc.ShowOnlyInGames", "Show the panel only in games", "Показывать панель только в игре"),
+        new("Loc.AutoShowHint", "The panel hides when you switch to another app. Settings are always available from the tray icon.", "При переключении в другое приложение панель скрывается. Настройки всегда доступны через значок в трее."),
+        new("Loc.ManualGames", "Manually added games", "Игры, добавленные вручную"),
+        new("Loc.AddExe", "Add EXE…", "Добавить EXE…"),
+        new("Loc.RemoveGame", "Remove", "Убрать"),
+        new("Loc.ManualGamesHint", "If a game is not detected automatically, add its executable file.", "Если игра не определилась автоматически, добавьте её исполняемый файл."),
+        new("Loc.SystemMetrics", "System metrics", "Показатели системы"),
+        new("Loc.GraphicsCard", "Graphics card", "Видеокарта"),
+        new("Loc.FpsSource", "FPS source", "Источник FPS"),
+        new("Loc.TelemetryHint", "Some temperatures require administrator access. Use windowed or borderless fullscreen mode in your game.", "Некоторые температуры доступны только с правами администратора. В игре используйте оконный режим или полноэкранный без рамки."),
+        new("Loc.Controls", "Controls", "Управление"),
+        new("Loc.HotkeyLock", "Lock / move the panel", "Закрепить / перемещать"),
+        new("Loc.HotkeyVisibility", "Show / hide the panel", "Показать / скрыть панель"),
+        new("Loc.HotkeySettings", "Open settings", "Открыть настройки"),
+        new("Loc.DragHint", "Drag the panel by an empty area. Open settings by right-clicking the panel or using the tray icon.", "Перемещайте панель за свободное место. Настройки также доступны по правому клику или через значок в трее."),
+        new("Loc.AutoSave", "Changes are saved automatically", "Изменения сохраняются автоматически"),
+        new("Loc.Saving", "Saving…", "Сохранение…"),
+        new("Loc.Saved", "Changes saved", "Изменения сохранены"),
+        new("Loc.SaveFailed", "Could not save settings", "Не удалось сохранить настройки"),
+        new("Loc.NoPlayback", "Nothing playing", "Нет воспроизведения"),
+        new("Loc.OpenPlayer", "Open a music player", "Откройте музыкальный плеер"),
+        new("Loc.PreviousTrack", "Previous track", "Предыдущий трек"),
+        new("Loc.PlayPause", "Play / pause", "Воспроизвести / пауза"),
+        new("Loc.PlayPauseAccessible", "Play or pause", "Воспроизвести или приостановить"),
+        new("Loc.NextTrack", "Next track", "Следующий трек"),
+        new("Loc.Mute", "Mute or unmute", "Выключить или включить звук"),
+        new("Loc.MusicVolume", "Music application volume", "Громкость музыкального приложения")
+    ];
+}

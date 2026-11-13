@@ -1,0 +1,243 @@
+<Window x:Class="GlimHUD.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{DynamicResource Loc.SettingsTitle}" Width="640" Height="790" MinWidth="540" MinHeight="540"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResizeWithGrip"
+        AllowsTransparency="True" Background="Transparent" Foreground="#F2F7FA"
+        FontFamily="Segoe UI" FontSize="13" Loaded="Window_Loaded" Closed="Window_Closed">
+    <Window.Resources>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#F2F7FA"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <Style x:Key="Muted" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#93A6B4"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="#18232D"/>
+            <Setter Property="BorderBrush" Value="#263642"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="20"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,17"/>
+        </Style>
+        <Style TargetType="CheckBox" BasedOn="{StaticResource DarkCheckBox}">
+            <Setter Property="Foreground" Value="#DFEAF0"/>
+            <Setter Property="Margin" Value="0,0,22,11"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style TargetType="Slider" BasedOn="{StaticResource CyanSlider}">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="Margin" Value="0,8,0,0"/>
+            <Setter Property="MinHeight" Value="26"/>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="#EEF5F8"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Item" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Item" Property="Background" Value="#2D4755"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="#233D49"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="#EEF5F8"/>
+            <Setter Property="Background" Value="#101A23"/>
+            <Setter Property="BorderBrush" Value="#344853"/>
+            <Setter Property="MinHeight" Value="37"/>
+            <Setter Property="Margin" Value="0,7,0,0"/>
+            <Setter Property="DisplayMemberPath" Value="Label"/>
+            <Setter Property="SelectedValuePath" Value="Key"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="#101A23" BorderBrush="#344853" BorderThickness="1" CornerRadius="7">
+                                            <Path Data="M 0 0 L 4 4 L 8 0" Stroke="#92A9B8" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" IsHitTestVisible="False" Margin="12,7,36,7" VerticalAlignment="Center"/>
+                            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+                                <Border Background="#17242E" BorderBrush="#344853" BorderThickness="1" CornerRadius="8" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" Margin="0,4,0,0" Padding="4" MaxHeight="260">
+                                    <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="HeaderButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#B4C5CF"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="34"/><Setter Property="Height" Value="32"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="6"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bg" Property="Background" Value="#293B47"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="ActionButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#EEF5F8"/>
+            <Setter Property="Background" Value="#233440"/>
+            <Setter Property="BorderBrush" Value="#3B5360"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="13,8"/>
+            <Setter Property="MinHeight" Value="35"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+                <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger></ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="DarkTextBox" TargetType="TextBox">
+            <Setter Property="Foreground" Value="#EEF5F8"/><Setter Property="Background" Value="#101A23"/>
+            <Setter Property="BorderBrush" Value="#344853"/><Setter Property="CaretBrush" Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="Padding" Value="10,7"/><Setter Property="MinHeight" Value="35"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
+                <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="7"><ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/></Border>
+                <ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style x:Key="GameListItem" TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="#EEF5F8"/><Setter Property="Padding" Value="10,7"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+                <Border x:Name="Surface" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="5"><ContentPresenter/></Border>
+                <ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource AccentSoftBrush}"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="#213440"/></Trigger></ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
+    </Window.Resources>
+    <Border Background="#101921" BorderBrush="#31434E" BorderThickness="1" CornerRadius="18" Margin="6">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="92"/><RowDefinition Height="*"/><RowDefinition Height="45"/></Grid.RowDefinitions>
+            <Grid Margin="25,15,18,0" MouseLeftButtonDown="Title_MouseLeftButtonDown">
+                <StackPanel VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="Glim" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="HUD" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource AccentTextBrush}"/><Border Background="#203844" CornerRadius="5" Margin="12,7,0,5" Padding="7,2"><TextBlock x:Name="VersionBadge" Text="0.1.1" Foreground="#9CCFDC" FontSize="10"/></Border></StackPanel>
+                    <TextBlock Text="{DynamicResource Loc.Tagline}" Style="{StaticResource Muted}" Margin="0,4,0,0"/>
+                </StackPanel>
+                <Button Content="✕" Style="{StaticResource HeaderButton}" HorizontalAlignment="Right" VerticalAlignment="Top" Click="Close_Click" ToolTip="{DynamicResource Loc.CloseSettings}" AutomationProperties.Name="{DynamicResource Loc.CloseSettings}"/>
+            </Grid>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,4,24,0">
+                <StackPanel>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Loc.Appearance}" Style="{StaticResource SectionTitle}"/>
+                            <TextBlock Text="{DynamicResource Loc.Language}"/>
+                            <ComboBox x:Name="LanguageCombo" SelectionChanged="Language_Changed" AutomationProperties.Name="{DynamicResource Loc.Language}"/>
+                            <TextBlock Text="{DynamicResource Loc.LanguageHint}" Style="{StaticResource Muted}" Margin="0,5,0,17"/>
+                            <DockPanel><TextBlock Text="{DynamicResource Loc.BackgroundOpacity}"/><TextBlock x:Name="OpacityValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                            <Slider x:Name="OpacitySlider" Minimum="0.05" Maximum="0.85" SmallChange="0.05" LargeChange="0.1" ValueChanged="Appearance_Changed" AutomationProperties.Name="{DynamicResource Loc.BackgroundOpacity}"/>
+                            <TextBlock Text="{DynamicResource Loc.OpacityHint}" Style="{StaticResource Muted}" Margin="0,5,0,17"/>
+                            <DockPanel><TextBlock Text="{DynamicResource Loc.PanelScale}"/><TextBlock x:Name="ScaleValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                            <Slider x:Name="ScaleSlider" Minimum="0.65" Maximum="1.5" SmallChange="0.05" LargeChange="0.1" ValueChanged="Appearance_Changed" AutomationProperties.Name="{DynamicResource Loc.PanelScale}"/>
+                            <WrapPanel Margin="0,19,0,0">
+                                <CheckBox x:Name="FpsCheck" Content="FPS" Checked="Modules_Changed" Unchecked="Modules_Changed"/>
+                                <CheckBox x:Name="CpuCheck" Content="CPU" Checked="Modules_Changed" Unchecked="Modules_Changed"/>
+                                <CheckBox x:Name="GpuCheck" Content="GPU" Checked="Modules_Changed" Unchecked="Modules_Changed"/>
+                                <CheckBox x:Name="RamCheck" Content="RAM" Checked="Modules_Changed" Unchecked="Modules_Changed"/>
+                            </WrapPanel>
+                            <CheckBox x:Name="LockedCheck" Content="{DynamicResource Loc.LockPanel}" Margin="0,5,0,0" Checked="Lock_Changed" Unchecked="Lock_Changed"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Loc.AccentColor}" Style="{StaticResource SectionTitle}"/>
+                            <CheckBox x:Name="WindowsAccentCheck" Content="{DynamicResource Loc.UseWindowsAccent}" Checked="AccentMode_Changed" Unchecked="AccentMode_Changed" Margin="0,0,0,13"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="43"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Border x:Name="CustomColorSwatch" Width="33" Height="33" HorizontalAlignment="Left" CornerRadius="8" BorderBrush="#526977" BorderThickness="1" Background="{DynamicResource AccentBrush}"/>
+                                <TextBox x:Name="ColorHexBox" Grid.Column="1" Style="{StaticResource DarkTextBox}" MaxLength="7" TextChanged="ColorHex_Changed" LostKeyboardFocus="ColorHex_LostFocus" AutomationProperties.Name="{DynamicResource Loc.CustomColorHex}"/>
+                                <Button x:Name="ChooseColorButton" Grid.Column="2" Content="{DynamicResource Loc.ChooseColor}" Style="{StaticResource ActionButton}" Margin="10,0,0,0" Click="ChooseColor_Click"/>
+                            </Grid>
+                            <TextBlock x:Name="ColorError" Text="{DynamicResource Loc.ColorError}" Foreground="#F6A29F" FontSize="11" Margin="0,7,0,0" Visibility="Collapsed"/>
+                            <TextBlock Text="{DynamicResource Loc.CustomColorHint}" Style="{StaticResource Muted}" Margin="0,9,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Loc.Player}" Style="{StaticResource SectionTitle}"/>
+                            <CheckBox x:Name="MusicCheck" Content="{DynamicResource Loc.ShowPlayer}" Checked="Modules_Changed" Unchecked="Modules_Changed" Margin="0,0,0,10"/>
+                            <TextBlock Text="{DynamicResource Loc.ShowPlayerHint}" Style="{StaticResource Muted}" Margin="0,0,0,14"/>
+                            <CheckBox x:Name="WheelVolumeCheck" Content="{DynamicResource Loc.ScrollVolume}" Checked="PlayerOptions_Changed" Unchecked="PlayerOptions_Changed" Margin="0,0,0,6"/>
+                            <TextBlock Text="{DynamicResource Loc.ScrollVolumeHint}" Style="{StaticResource Muted}" Margin="0,0,0,18"/>
+                            <TextBlock Text="{DynamicResource Loc.MusicSource}"/>
+                            <ComboBox x:Name="MediaCombo" SelectionChanged="Media_Changed" AutomationProperties.Name="{DynamicResource Loc.MusicSource}"/>
+                            <TextBlock x:Name="MediaStatus" Style="{StaticResource Muted}" Margin="0,7,0,15"/>
+                            <TextBlock Text="{DynamicResource Loc.VolumeApp}"/>
+                            <ComboBox x:Name="AudioCombo" SelectionChanged="Audio_Changed" AutomationProperties.Name="{DynamicResource Loc.VolumeAppAccessible}"/>
+                            <TextBlock x:Name="AudioStatus" Style="{StaticResource Muted}" Margin="0,7,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Loc.AutoShow}" Style="{StaticResource SectionTitle}"/>
+                            <CheckBox x:Name="AutoShowCheck" Content="{DynamicResource Loc.ShowOnlyInGames}" Checked="AutoShow_Changed" Unchecked="AutoShow_Changed" Margin="0,0,0,8"/>
+                            <TextBlock Text="{DynamicResource Loc.AutoShowHint}" Style="{StaticResource Muted}" Margin="0,0,0,17"/>
+                            <TextBlock Text="{DynamicResource Loc.ManualGames}" Margin="0,0,0,7"/>
+                            <ListBox x:Name="GamePathsList" MinHeight="62" MaxHeight="145" Background="#101A23" BorderBrush="#344853" BorderThickness="1" Padding="3" ItemContainerStyle="{StaticResource GameListItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="GamePath_SelectionChanged" AutomationProperties.Name="{DynamicResource Loc.ManualGames}">
+                                <ListBox.ItemTemplate><DataTemplate><StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding FullPath}" Style="{StaticResource Muted}" FontSize="10" Margin="0,3,0,0" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                            </ListBox>
+                            <TextBlock x:Name="GamePathsStatus" Style="{StaticResource Muted}" Margin="0,7,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,11,0,0">
+                                <Button Content="{DynamicResource Loc.AddExe}" Style="{StaticResource ActionButton}" Click="AddGame_Click"/>
+                                <Button x:Name="RemoveGameButton" Content="{DynamicResource Loc.RemoveGame}" Style="{StaticResource ActionButton}" Margin="9,0,0,0" IsEnabled="False" Click="RemoveGame_Click"/>
+                            </StackPanel>
+                            <TextBlock Text="{DynamicResource Loc.ManualGamesHint}" Style="{StaticResource Muted}" Margin="0,12,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Loc.SystemMetrics}" Style="{StaticResource SectionTitle}"/>
+                            <TextBlock Text="{DynamicResource Loc.GraphicsCard}"/>
+                            <ComboBox x:Name="GpuCombo" SelectionChanged="Gpu_Changed" AutomationProperties.Name="{DynamicResource Loc.GraphicsCard}"/>
+                            <TextBlock x:Name="HardwareStatus" Style="{StaticResource Muted}" Margin="0,7,0,15"/>
+                            <TextBlock Text="{DynamicResource Loc.FpsSource}"/>
+                            <ComboBox x:Name="FpsCombo" SelectionChanged="Fps_Changed" DropDownOpened="Fps_DropDownOpened" AutomationProperties.Name="{DynamicResource Loc.FpsSource}"/>
+                            <TextBlock x:Name="FpsStatus" Style="{StaticResource Muted}" Margin="0,7,0,0"/>
+                            <TextBlock Text="{DynamicResource Loc.TelemetryHint}" Style="{StaticResource Muted}" Margin="0,13,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Loc.Controls}" Style="{StaticResource SectionTitle}"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="145"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="29"/><RowDefinition Height="29"/><RowDefinition Height="29"/></Grid.RowDefinitions>
+                                <TextBlock Text="Ctrl + Alt + G" Foreground="{DynamicResource AccentTextBrush}"/><TextBlock Grid.Column="1" Text="{DynamicResource Loc.HotkeyLock}"/>
+                                <TextBlock Grid.Row="1" Text="Ctrl + Alt + H" Foreground="{DynamicResource AccentTextBrush}"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{DynamicResource Loc.HotkeyVisibility}"/>
+                                <TextBlock Grid.Row="2" Text="Ctrl + Alt + S" Foreground="{DynamicResource AccentTextBrush}"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{DynamicResource Loc.HotkeySettings}"/>
+                            </Grid>
+                            <TextBlock Text="{DynamicResource Loc.DragHint}" Style="{StaticResource Muted}" Margin="0,7,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+            <TextBlock Grid.Row="2" x:Name="SaveStatus" Text="{DynamicResource Loc.AutoSave}" Foreground="#718996" FontSize="11" VerticalAlignment="Center" Margin="26,0,25,0"/>
+        </Grid>
+    </Border>
+</Window>

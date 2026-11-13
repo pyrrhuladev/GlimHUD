@@ -1,0 +1,28 @@
+name: Bug report
+description: Report an observable problem in GlimHUD.
+body:
+  - type: input
+    id: version
+    attributes:
+      label: GlimHUD version
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and build
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the media player or game when relevant. Remove private paths, metadata, and credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
