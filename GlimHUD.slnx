@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="src/GlimHUD/GlimHUD.csproj" />
   <Folder Name="/Tests/">
+    <Project Path="tests/GlimHUD.NetworkChecks/GlimHUD.NetworkChecks.csproj" />
     <Project Path="tests/GlimHUD.UpdateChecks/GlimHUD.UpdateChecks.csproj" />
     <Project Path="tests/GlimHUD.Checks/GlimHUD.Checks.csproj" />
     <Project Path="tests/GlimHUD.MediaChecks/GlimHUD.MediaChecks.csproj" />

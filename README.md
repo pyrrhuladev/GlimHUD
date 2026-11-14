@@ -1,8 +1,8 @@
 # GlimHUD
 
-A transparent Windows overlay for music controls, FPS, CPU, GPU, and memory. Built for windowed and borderless games, with no DLL injection into games.
+A transparent Windows overlay for music controls, FPS, CPU, GPU, memory, and network traffic. Built for windowed and borderless games, with no DLL injection into games.
 
-![GlimHUD overlay preview on dark and light backgrounds](docs/images/overlay-preview.png)
+![GlimHUD overlay with optional network rates](docs/images/overlay-preview.png)
 
 *Design preview with sample measurements.*
 
@@ -16,6 +16,7 @@ A transparent Windows overlay for music controls, FPS, CPU, GPU, and memory. Bui
 - Current track, artwork, previous/play/pause/next controls through Windows media sessions. Supports compatible players, including Yandex Music.
 - Per-application music volume through WASAPI, with optional scrolling over the player area. It does not fall back to changing the system master volume.
 - Presented FPS through PresentMon, CPU/GPU load and available temperatures, and physical memory usage.
+- Optional network download/upload rates, adapter selection, session traffic totals, and a 60-second graph in Settings.
 - Optional player hiding, automatic display while a recognized game is active, and manual game executable selection.
 - Windows accent color or a custom color, adjustable scale, and click-through mode.
 - Independent text/background colors with white, black and custom choices.
@@ -57,6 +58,14 @@ Optional **React to music** follows the audio level of the application selected 
 
 Optional **Start with Windows** is available in Settings. It registers the current extracted executable for your Windows sign-in without administrator access. Keep that folder in place; after moving to another copy, toggle the option off and on to update its location. Windows Startup apps settings can independently disable registered applications. The option is off until explicitly enabled and does not alter Windows permissions or request UAC during sign-in.
 
+**Network** in Settings lets you add download and upload rates to the HUD; this module is off by default. Automatic selection uses one connected physical Ethernet or Wi-Fi adapter, preferring the Windows IPv4 default-route metric and otherwise an adapter with a gateway. Select an adapter manually for VPN, virtual-switch, or multi-adapter setups. A manually selected adapter that disconnects is shown as unavailable until it returns.
+
+The network settings show the selected adapter's live rates, received/sent totals for this app session, reported link speed, and a 60-second graph. Totals start from the first observation of each adapter in this process and survive switching adapters or reconnecting; Windows counter resets and unobservable intervals are skipped. Switching adapters starts a fresh graph while retaining each adapter's session totals. Closing GlimHUD clears these totals and history. Rates use decimal byte units such as kB/s and MB/s; link speed uses bits per second. Link speed is the adapter's reported connection rate, not an internet speed test. Adapter traffic includes all applications and local-network transfers; it is not a per-game or internet-only measurement.
+
+![Network settings with sample adapter traffic and history](docs/images/network-settings.png)
+
+*Network settings preview with sample measurements.*
+
 **Updates** in Settings can check for a newer installed version, download it, and install it when you choose. Automatic checks can be disabled. Checks never install an update or restart the app by themselves. Both update metadata and downloaded installers must pass NetSparkle Ed25519 verification against the public key shipped with GlimHUD. Portable copies use manual updates through GitHub Releases.
 
 Windows publisher signing (Authenticode) is not configured yet, so Windows may show an unknown-publisher or SmartScreen warning. Update signatures authenticate project updates; they do not provide a verified Windows publisher identity. There is no published Microsoft Store listing. See [distribution and release setup](docs/distribution.md) for the website, installer, and update pipeline, or [Microsoft Store preparation](docs/microsoft-store.md) for the separate MSIX work.
@@ -68,6 +77,8 @@ Music comes from Windows Global System Media Transport Controls. Metadata and ar
 CPU usage uses Windows Processor Utility, which accounts for clock speed and boost and can exceed 100%. If that counter is unavailable, GlimHUD falls back to CPU busy time. GPU usage takes the busiest graphics engine or vendor core reading, whichever is higher, for the selected adapter. CPU/GPU/RAM sampling runs once per second independently of media and artwork loading. This follows the measurement definitions described by [Valve](https://help.steampowered.com/en/faqs/view/3462-CD4C-36BD-5767); different sampling times and adapter selections can still produce different readings.
 
 RAM and performance counters have native Windows data sources. Optional temperature sensors use LibreHardwareMonitor; available readings depend on hardware, drivers, and permissions. An unavailable measurement is shown as a dash. GlimHUD does not automatically elevate or change Windows security settings.
+
+Network readings use local Windows interface counters sampled about once per second, with rates calculated from byte-counter differences and actual elapsed time. GlimHUD measures one selected adapter at a time rather than adding physical and VPN traffic together. It does not capture packets, inspect their destinations or payloads, send probes, or require administrator access for this module. The 60-second history stays in memory; disconnected or invalid intervals appear as gaps. Network-interface and driver limitations can make a reading unavailable.
 
 FPS uses [PresentMon](https://github.com/GameTechDev/PresentMon) to count presented frames. This is not the display refresh rate or the overlay's own frame rate. ETW capture can require additional permissions. Settings shows an explicit administrator restart option when Windows denies ETW access; cancelling the Windows prompt keeps the current app running. No group membership is changed. The other overlay features work when FPS capture is unavailable. Choose a game manually when automatic process selection is unsuitable.
 

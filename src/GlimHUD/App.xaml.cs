@@ -74,14 +74,16 @@ public partial class App : System.Windows.Application
         overlay.Settings.Scale = 1;
         overlay.Settings.TextColor = "#F2F8FC";
         overlay.Settings.BackgroundColor = "#07121D";
-        var neonPreview = variant is "neon" or "neon-low" or "neon-pulse" or "compact-neon" or "neon-light";
+        var networkPreview = variant is "network" or "network-neon" or "network-only" or "network-idle";
+        var neonPreview = variant is "neon" or "neon-low" or "neon-pulse" or "compact-neon" or "neon-light" or "network-neon";
         overlay.Settings.GlowEnabled = neonPreview || variant is "glow" or "glow-low" or "glow-peak" or "compact-glow" or "glow-light";
         overlay.Settings.GlowStyle = neonPreview ? Models.GlowStyles.NeonFlow : Models.GlowStyles.RainbowWave;
         overlay.Settings.GlowReactive = true;
         overlay.Settings.GlowIntensity = .75;
         overlay.Settings.ShowMusic = variant is not ("compact" or "compact-light" or "compact-glow" or "compact-neon");
         overlay.Settings.ShowFps = overlay.Settings.ShowCpu = overlay.Settings.ShowGpu = overlay.Settings.ShowRam = true;
-        if (variant is "fps-only" or "cpu-only" or "ram-only" or "music-only")
+        overlay.Settings.ShowNetwork = networkPreview;
+        if (variant is "fps-only" or "cpu-only" or "ram-only" or "music-only" or "network-only")
         {
             overlay.Settings.ShowMusic = variant == "music-only";
             overlay.Settings.ShowFps = variant == "fps-only";
@@ -117,6 +119,7 @@ public partial class App : System.Windows.Application
         overlay.RamMemory.Text = L10n.Text("{0:0.#}/{1:0.#} GB", "{0:0.#}/{1:0.#} ГБ", 8.6, 16);
         overlay.VolumeSlider.Value = 60;
         overlay.VolumeValue.Text = "60%";
+        if (networkPreview) overlay.SetNetworkPreview(CreateNetworkPreview(variant == "network-idle"));
         // A square, high-contrast fixture exercises the real decoder and rounded clip.
         var coverDrawing = new DrawingVisual();
         using (var drawing = coverDrawing.RenderOpen())
@@ -168,7 +171,13 @@ public partial class App : System.Windows.Application
 
         var settings = new SettingsWindow(overlay);
         var settingsContent = (FrameworkElement)settings.Content;
-        if (variant == "updates")
+        if (networkPreview)
+        {
+            RenderElement(settingsContent, new Size(640, 790));
+            settings.NetworkCard.BringIntoView();
+            settingsContent.UpdateLayout();
+        }
+        else if (variant == "updates")
         {
             RenderElement(settingsContent, new Size(640, 790));
             settings.UpdatesCard.BringIntoView();
@@ -191,6 +200,22 @@ public partial class App : System.Windows.Application
         SavePng(RenderElement(settingsContent, new Size(640, 790)), Path.ChangeExtension(outputPath, ".settings.png"));
         settings.Close();
         overlay.Close();
+    }
+
+    private static Models.NetworkSnapshot CreateNetworkPreview(bool idle = false)
+    {
+        // Explicit render diagnostics only: never inserted into the live sampler.
+        var now = DateTimeOffset.UtcNow;
+        var adapter = new Models.NetworkAdapterInfo("preview-adapter",
+            L10n.Text("Ethernet (preview)", "Ethernet (пример)"), "Design preview", true, true, true, 1_000_000_000);
+        var history = Enumerable.Range(0, 60).Where(index => index is not (40 or 41)).Select(index => new Models.NetworkHistorySample(
+            now.AddSeconds(index - 59),
+            index is 22 or 23 ? null : idle ? 0 : 2_000_000 + 9_000_000 * (.5 + .5 * Math.Sin(index * .26)),
+            index is 22 or 23 ? null : idle ? 0 : 150_000 + 950_000 * (.5 + .5 * Math.Cos(index * .18)))).ToArray();
+        history[^1] = new Models.NetworkHistorySample(now, idle ? 0 : 12_400_000, idle ? 0 : 850_000);
+        return new Models.NetworkSnapshot(Models.NetworkStatus.Ready, adapter.Id, adapter.Name,
+            adapter.LinkSpeedBitsPerSecond, idle ? 0 : 12_400_000, idle ? 0 : 850_000,
+            2_450_000_000, 180_000_000, [adapter], history, now);
     }
 
     private static RenderTargetBitmap RenderElement(FrameworkElement element, Size? fixedSize = null)
@@ -256,6 +281,7 @@ public partial class App : System.Windows.Application
             var overlayColors = CheckOverlayColors(overlay, settings);
             var glowPresentation = CheckGlowPresentation(overlay, settings);
             var contextMenuPresentation = await CheckContextMenuPresentationAsync(overlay, settings);
+            var networkPresentation = CheckNetworkPresentation();
             settings.Close();
             overlay.Settings.Locked = true;
             overlay.ApplySettings();
@@ -287,6 +313,18 @@ public partial class App : System.Windows.Application
                 OverlayColors = overlayColors,
                 GlowPresentation = glowPresentation,
                 ContextMenuPresentation = contextMenuPresentation,
+                NetworkPresentation = networkPresentation,
+                Network = new
+                {
+                    Status = overlay.NetworkSnapshot?.Status.ToString(),
+                    overlay.NetworkSnapshot?.AdapterName,
+                    overlay.NetworkSnapshot?.DownloadBytesPerSecond,
+                    overlay.NetworkSnapshot?.UploadBytesPerSecond,
+                    overlay.NetworkSnapshot?.SessionReceivedBytes,
+                    overlay.NetworkSnapshot?.SessionSentBytes,
+                    AdapterCount = overlay.NetworkSnapshot?.AvailableAdapters.Count,
+                    HistorySamples = overlay.NetworkSnapshot?.History.Count
+                },
                 Media = new { overlay.MediaSnapshot?.IsAvailable, SourceCount = overlay.MediaSnapshot?.Sessions.Count, overlay.MediaSnapshot?.Status },
                 Audio = new { overlay.AudioSnapshot?.IsAvailable, SourceCount = overlay.AudioSnapshot?.Sessions.Count, overlay.AudioSnapshot?.Status },
                 Telemetry = overlay.TelemetrySnapshot,
@@ -298,6 +336,41 @@ public partial class App : System.Windows.Application
             await overlay.StopAsync();
             overlay.Close();
         }
+    }
+
+    private static bool CheckNetworkPresentation()
+    {
+        var preview = new OverlayWindow(initializeServices: false);
+        try
+        {
+            preview.Settings.ShowMusic = preview.Settings.ShowFps = preview.Settings.ShowCpu
+                = preview.Settings.ShowGpu = preview.Settings.ShowRam = false;
+            preview.Settings.ShowNetwork = true;
+            preview.ApplySettings();
+            preview.SetNetworkPreview(CreateNetworkPreview());
+            var content = (FrameworkElement)preview.Content;
+            RenderElement(content);
+            if (preview.NetworkSection.Visibility != Visibility.Visible || preview.FpsSection.Visibility != Visibility.Collapsed
+                || preview.RamDivider.Visibility != Visibility.Collapsed || content.DesiredSize.Width is < 120 or > 260
+                || preview.NetworkDownloadValue.Text != Services.NetworkValueFormatter.FormatRate(12_400_000))
+                throw new InvalidOperationException("The network-only overlay layout or rate formatting is invalid.");
+            preview.SetNetworkPreview(CreateNetworkPreview(idle: true));
+            if (preview.NetworkDownloadValue.Text != Services.NetworkValueFormatter.FormatRate(0)
+                || preview.NetworkUploadValue.Text != Services.NetworkValueFormatter.FormatRate(0))
+                throw new InvalidOperationException("A measured idle network must remain a valid zero.");
+            var details = new SettingsWindow(preview);
+            try
+            {
+                RenderElement((FrameworkElement)details.Content, new Size(640, 790));
+                var downFigures = PathGeometry.CreateFromGeometry(details.NetworkDownloadHistory.Data).Figures.Count;
+                var upFigures = PathGeometry.CreateFromGeometry(details.NetworkUploadHistory.Data).Figures.Count;
+                if (downFigures != 3 || upFigures != 3)
+                    throw new InvalidOperationException($"Network history must preserve missing measurements and missing seconds: down={downFigures}, up={upFigures}.");
+            }
+            finally { details.Close(); }
+            return true;
+        }
+        finally { preview.Close(); }
     }
 
     private static bool CheckOverlayColors(OverlayWindow overlay, SettingsWindow settings)

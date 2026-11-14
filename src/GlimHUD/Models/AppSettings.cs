@@ -15,6 +15,7 @@ public sealed class AppSettings
     public string? MediaSourceAppId { get; set; }
     public string? AudioSessionId { get; set; }
     public string? GpuIdentifier { get; set; }
+    public string? NetworkAdapterId { get; set; }
     public bool ShowMusic { get; set; } = true;
     public bool ScrollMusicVolume { get; set; } = true;
     public bool AutoShowInGames { get; set; }
@@ -30,4 +31,5 @@ public sealed class AppSettings
     public bool ShowCpu { get; set; } = true;
     public bool ShowGpu { get; set; } = true;
     public bool ShowRam { get; set; } = true;
+    public bool ShowNetwork { get; set; }
 }

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0 - 2026-11-14
+
+### Added
+
+- Optional network module for live download and upload rates in the HUD, off by default.
+- Network settings with automatic or manual adapter selection, reported link speed, per-adapter session received/sent totals, and a 60-second traffic graph.
+- English and Russian network labels, statuses, units, and help text.
+
+### Changed
+
+- Network monitoring uses one adapter at a time to avoid adding physical and VPN traffic together. Automatic selection prefers a connected physical Ethernet/Wi-Fi adapter; virtual or tunnel interfaces can be selected explicitly.
+- Documented that adapter traffic includes other applications and LAN transfers, while reported link speed is separate from measured throughput. Counters and graph history stay on the device without packet capture or external probes.
+
 ## 0.7.0 - 2026-11-14
 
 ### Added

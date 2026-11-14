@@ -29,6 +29,7 @@ public partial class SettingsWindow : Window
     private bool _updateInstalling;
     private bool _updateLinkFailed;
     private bool _isClosed;
+    private IReadOnlyList<NetworkAdapterInfo> _networkAdapters = [];
 
     public SettingsWindow(OverlayWindow overlay)
     {
@@ -80,7 +81,11 @@ public partial class SettingsWindow : Window
         L10n.LanguageChanged += LanguageChanged;
         _overlay.AppUpdates.Changed += AppUpdates_Changed;
         Activated += (_, _) => RefreshStartupState();
-        IsVisibleChanged += (_, _) => UpdateGlowSignalMonitoring();
+        IsVisibleChanged += (_, _) =>
+        {
+            UpdateGlowSignalMonitoring();
+            _overlay.SetNetworkSettingsVisible(IsLoaded && IsVisible && !_isClosed);
+        };
         MaxHeight = Math.Max(540, SystemParameters.WorkArea.Height - 20);
     }
 
@@ -88,6 +93,7 @@ public partial class SettingsWindow : Window
     {
         RefreshFpsTargets();
         UpdateGlowSignalMonitoring();
+        _overlay.SetNetworkSettingsVisible(IsVisible && !_isClosed);
     }
 
     private void Overlay_SnapshotsUpdated(object? sender, EventArgs e) => RefreshSnapshots();
@@ -131,6 +137,7 @@ public partial class SettingsWindow : Window
         try
         {
             RefreshHotkeys();
+            RefreshNetworkControls();
             var media = _overlay.MediaSnapshot;
             var mediaChoices = new List<Choice> { new("", L10n.Text("Automatic — prefer music", "Автоматически — музыка в приоритете")) };
             if (media is not null)
@@ -164,6 +171,7 @@ public partial class SettingsWindow : Window
             CpuCheck.IsChecked = _overlay.Settings.ShowCpu;
             GpuCheck.IsChecked = _overlay.Settings.ShowGpu;
             RamCheck.IsChecked = _overlay.Settings.ShowRam;
+            NetworkCheck.IsChecked = _overlay.Settings.ShowNetwork;
             WheelVolumeCheck.IsChecked = _overlay.Settings.ScrollMusicVolume;
             AutoShowCheck.IsChecked = _overlay.Settings.AutoShowInGames;
             GlowEnabledCheck.IsChecked = _overlay.Settings.GlowEnabled;
@@ -183,6 +191,97 @@ public partial class SettingsWindow : Window
         _overlay.Settings.GlowReactive = GlowReactiveCheck.IsChecked == true;
         UpdateGlowControls();
         ApplyAndSave();
+    }
+
+    private void RefreshNetworkControls()
+    {
+        var snapshot = _overlay.NetworkSnapshot;
+        if (snapshot is not null) _networkAdapters = snapshot.AvailableAdapters;
+        var choices = new List<Choice> { new("", FormatUi("Loc.NetworkAutomatic")) };
+        choices.AddRange(_networkAdapters.Select(adapter => new Choice(adapter.Id,
+            $"{adapter.Name} · {FormatUi(adapter.IsPhysical ? "Loc.NetworkPhysical" : "Loc.NetworkVirtual")}" +
+            (adapter.IsOperational ? "" : $" · {FormatUi("Loc.NetworkInactive")}"))));
+        var selectedId = _overlay.Settings.NetworkAdapterId;
+        var selectedAdapter = _networkAdapters.FirstOrDefault(adapter => string.Equals(adapter.Id, selectedId, StringComparison.OrdinalIgnoreCase));
+        UpdateChoices(NetworkAdapterCombo, choices, selectedAdapter?.Id ?? selectedId);
+        NetworkAdapterNameValue.Text = snapshot?.AdapterName is { Length: > 0 } adapterName ? adapterName
+            : selectedAdapter?.Name ?? FormatUi(selectedId is null ? "Loc.NetworkAutomatic" : "Loc.NetworkSelectedAdapter");
+        NetworkAdapterNameValue.ToolTip = selectedAdapter?.Description;
+        NetworkStatusText.SetResourceReference(TextBlock.TextProperty, snapshot?.Status switch
+        {
+            NetworkStatus.Ready => "Loc.NetworkReady",
+            NetworkStatus.NoAdapter => "Loc.NetworkNoAdapter",
+            NetworkStatus.AdapterMissing => "Loc.NetworkAdapterMissing",
+            NetworkStatus.AdapterDown => "Loc.NetworkAdapterDown",
+            NetworkStatus.ReadError => "Loc.NetworkReadError",
+            NetworkStatus.Unsupported => "Loc.NetworkUnsupported",
+            _ => "Loc.NetworkWarmingUp"
+        });
+        NetworkDownloadValue.Text = NetworkValueFormatter.FormatRate(snapshot?.DownloadBytesPerSecond);
+        NetworkUploadValue.Text = NetworkValueFormatter.FormatRate(snapshot?.UploadBytesPerSecond);
+        NetworkReceivedValue.Text = NetworkValueFormatter.FormatBytes(snapshot?.SessionReceivedBytes);
+        NetworkSentValue.Text = NetworkValueFormatter.FormatBytes(snapshot?.SessionSentBytes);
+        NetworkLinkSpeedValue.Text = NetworkValueFormatter.FormatLinkSpeed(snapshot?.LinkSpeedBitsPerSecond);
+        DrawNetworkHistory();
+    }
+
+    private void NetworkAdapter_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing) return;
+        _overlay.Settings.NetworkAdapterId = SelectedKey(NetworkAdapterCombo);
+        ApplyAndSave();
+        var wasSyncing = _syncing;
+        _syncing = true;
+        try { RefreshNetworkControls(); }
+        finally { _syncing = wasSyncing; }
+    }
+
+    private void NetworkHistory_SizeChanged(object sender, SizeChangedEventArgs e) => DrawNetworkHistory();
+
+    private void DrawNetworkHistory()
+    {
+        if (NetworkDownloadHistory is null || NetworkUploadHistory is null) return;
+        var snapshot = _overlay.NetworkSnapshot;
+        var end = snapshot?.SampledAt ?? DateTimeOffset.UtcNow;
+        var start = end.AddSeconds(-60);
+        var history = snapshot?.History.Where(sample => sample.SampledAt >= start && sample.SampledAt <= end).ToArray() ?? [];
+        var rates = history.SelectMany(sample => new[] { sample.DownloadBytesPerSecond, sample.UploadBytesPerSecond })
+            .Where(IsNetworkRate).Select(rate => rate!.Value).ToArray();
+        NetworkHistoryEmpty.Visibility = rates.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var maximum = Math.Max(1000, rates.DefaultIfEmpty(0).Max());
+        NetworkHistoryScaleValue.Text = FormatUi("Loc.NetworkHistoryScale", NetworkValueFormatter.FormatRate(rates.Length == 0 ? null : maximum));
+        var width = NetworkHistoryPlot.ActualWidth;
+        var height = NetworkHistoryPlot.ActualHeight;
+        NetworkDownloadHistory.Data = BuildNetworkHistory(history, start, maximum, width, height, sample => sample.DownloadBytesPerSecond);
+        NetworkUploadHistory.Data = BuildNetworkHistory(history, start, maximum, width, height, sample => sample.UploadBytesPerSecond);
+    }
+
+    private static bool IsNetworkRate(double? value) => value is { } rate && double.IsFinite(rate) && rate >= 0;
+
+    private static Geometry BuildNetworkHistory(IReadOnlyList<NetworkHistorySample> history, DateTimeOffset start,
+        double maximum, double width, double height, Func<NetworkHistorySample, double?> selectRate)
+    {
+        if (width <= 4 || height <= 4) return Geometry.Empty;
+        var geometry = new StreamGeometry();
+        using (var drawing = geometry.Open())
+        {
+            var connected = false;
+            var previousAt = default(DateTimeOffset);
+            foreach (var sample in history)
+            {
+                var rate = selectRate(sample);
+                if (!IsNetworkRate(rate)) { connected = false; continue; }
+                if (connected && (sample.SampledAt - previousAt).TotalSeconds > 1.75) connected = false;
+                var point = new Point(2 + (sample.SampledAt - start).TotalSeconds / 60 * (width - 4),
+                    height - 2 - rate!.Value / maximum * (height - 4));
+                if (connected) drawing.LineTo(point, isStroked: true, isSmoothJoin: true);
+                else drawing.BeginFigure(point, isFilled: false, isClosed: false);
+                connected = true;
+                previousAt = sample.SampledAt;
+            }
+        }
+        geometry.Freeze();
+        return geometry;
     }
 
     private void RefreshGlowStyles()
@@ -503,6 +602,7 @@ public partial class SettingsWindow : Window
         settings.ShowCpu = CpuCheck.IsChecked == true;
         settings.ShowGpu = GpuCheck.IsChecked == true;
         settings.ShowRam = RamCheck.IsChecked == true;
+        settings.ShowNetwork = NetworkCheck.IsChecked == true;
         ApplyAndSave();
     }
 
@@ -857,6 +957,7 @@ public partial class SettingsWindow : Window
     private void Window_Closed(object? sender, EventArgs e)
     {
         _isClosed = true;
+        _overlay.SetNetworkSettingsVisible(false);
         _overlay.AppUpdates.Changed -= AppUpdates_Changed;
         _overlay.SnapshotsUpdated -= Overlay_SnapshotsUpdated;
         L10n.LanguageChanged -= LanguageChanged;

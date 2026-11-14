@@ -126,6 +126,23 @@
                                 <TextBlock x:Name="RamMemory" Text="-" Width="77" TextAlignment="Right" FontSize="10" Foreground="{DynamicResource OverlayMutedTextBrush}" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
                             </StackPanel>
                         </StackPanel>
+                        <Border x:Name="RamDivider" Style="{StaticResource Divider}"/>
+                    </StackPanel>
+                    <StackPanel x:Name="NetworkSection" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
+                        <Path Data="M 11,6 L 11,10 M 3,16 L 3,10 L 19,10 L 19,16 M 7,0 L 15,0 L 15,6 L 7,6 Z M 0,16 L 6,16 L 6,22 L 0,22 Z M 16,16 L 22,16 L 22,22 L 16,22 Z"
+                              Width="22" Height="22" Stretch="Uniform" Stroke="{DynamicResource OverlayIconBrush}" StrokeThickness="1.4"
+                              StrokeLineJoin="Round" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                        <StackPanel Width="99">
+                            <TextBlock Text="{DynamicResource Loc.NetworkModule}" Style="{StaticResource MetricLabel}"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="↓" Width="13" FontSize="13" Foreground="{DynamicResource OverlayIconBrush}"/>
+                                <TextBlock x:Name="NetworkDownloadValue" Text="—" FontSize="13" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="↑" Width="13" FontSize="13" Foreground="{DynamicResource OverlayMutedTextBrush}"/>
+                                <TextBlock x:Name="NetworkUploadValue" Text="—" FontSize="13" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular"/>
+                            </StackPanel>
+                        </StackPanel>
                     </StackPanel>
                 </StackPanel>
             </Grid>

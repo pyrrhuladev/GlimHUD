@@ -24,6 +24,7 @@ public partial class OverlayWindow : Window
     private readonly AudioLevelMonitor _audioLevels = new();
     private readonly GlowMusicMotion _glowMotion = new();
     private readonly TelemetryService _telemetry = new();
+    private readonly NetworkTelemetryService _network = new();
     private readonly PresentMonService _fps = new();
     private readonly GameActivityService _gameActivity = new();
     private readonly AccentThemeService _accentTheme = new();
@@ -31,6 +32,7 @@ public partial class OverlayWindow : Window
     private readonly CancellationTokenSource _shutdown = new();
     private readonly DispatcherTimer _sampleTimer;
     private readonly DispatcherTimer _telemetryTimer;
+    private readonly DispatcherTimer _networkTimer;
     private readonly DispatcherTimer _fpsTimer;
     private readonly DispatcherTimer _volumeTimer;
     private readonly DispatcherTimer _glowTimer;
@@ -56,6 +58,8 @@ public partial class OverlayWindow : Window
     private OverlayMenuInterop? _hudMenuLayer;
     private bool _sampling;
     private bool _telemetrySampling;
+    private bool _networkSampling;
+    private int _networkSelectionRevision;
     private bool _applyingSnapshot;
     private bool _loaded;
     private bool _closing;
@@ -71,6 +75,7 @@ public partial class OverlayWindow : Window
     private byte[]? _lastArtwork;
     private Task? _sampleTask;
     private Task? _telemetryTask;
+    private Task? _networkTask;
     private Task? _volumeTask;
     private Task? _stopTask;
 
@@ -79,6 +84,7 @@ public partial class OverlayWindow : Window
     public MediaSnapshot? MediaSnapshot { get; private set; }
     public AudioSnapshot? AudioSnapshot { get; private set; }
     public TelemetrySnapshot? TelemetrySnapshot { get; private set; }
+    public NetworkSnapshot? NetworkSnapshot { get; private set; }
     public FpsSnapshot? FpsSnapshot { get; private set; }
     public GameActivitySnapshot? GameActivitySnapshot { get; private set; }
     public string CurrentAccentHex => _accentTheme.CurrentHex;
@@ -113,6 +119,8 @@ public partial class OverlayWindow : Window
         _sampleTimer.Tick += (_, _) => BeginSample();
         _telemetryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _telemetryTimer.Tick += (_, _) => BeginTelemetrySample();
+        _networkTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _networkTimer.Tick += (_, _) => BeginNetworkSample();
         _fpsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _fpsTimer.Tick += (_, _) => { UpdateFps(); RefreshVisibility(); UpdateWheelRegion(); };
         _volumeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
@@ -152,9 +160,11 @@ public partial class OverlayWindow : Window
         _fps.Start();
         _sampleTimer.Start();
         _telemetryTimer.Start();
+        _networkTimer.Start();
         _fpsTimer.Start();
         BeginSample();
         BeginTelemetrySample();
+        BeginNetworkSample();
         RefreshVisibility();
         UpdateWheelRegion();
         ConfigureAutomaticUpdates();
@@ -287,14 +297,23 @@ public partial class OverlayWindow : Window
         CpuSection.Visibility = Visible(Settings.ShowCpu);
         GpuSection.Visibility = Visible(Settings.ShowGpu);
         RamSection.Visibility = Visible(Settings.ShowRam);
+        NetworkSection.Visibility = Visible(Settings.ShowNetwork);
         // Always retain one visible module so the draggable overlay cannot become a zero-size window.
-        if (!Settings.ShowMusic && !Settings.ShowFps && !Settings.ShowCpu && !Settings.ShowGpu && !Settings.ShowRam)
+        if (!Settings.ShowMusic && !Settings.ShowFps && !Settings.ShowCpu && !Settings.ShowGpu && !Settings.ShowRam && !Settings.ShowNetwork)
         {
             Settings.ShowFps = true;
             FpsSection.Visibility = Visibility.Visible;
         }
         UpdateModuleDividers();
         _telemetry.PreferredGpuIdentifier = Settings.GpuIdentifier;
+        var networkSelectionChanged = !string.Equals(_network.PreferredAdapterId, Settings.NetworkAdapterId, StringComparison.OrdinalIgnoreCase);
+        if (networkSelectionChanged)
+        {
+            _networkSelectionRevision++;
+            NetworkSnapshot = null;
+        }
+        _network.PreferredAdapterId = Settings.NetworkAdapterId;
+        RenderNetwork();
         _native?.SetClickThrough(Settings.Locked);
         _hudMenuLayer?.BringToFront();
         if (_tray?.ContextMenuStrip is { Visible: true } trayMenu)
@@ -310,6 +329,7 @@ public partial class OverlayWindow : Window
             EnsureVisiblePosition();
             BeginSample();
             BeginTelemetrySample();
+            if (networkSelectionChanged || NetworkSnapshot is null) BeginNetworkSample();
             RefreshVisibility();
             UpdateWheelRegion();
         }
@@ -393,7 +413,8 @@ public partial class OverlayWindow : Window
         (FrameworkElement Section, Border? Divider)[] modules =
         [
             (MusicSection, MusicDivider), (FpsSection, FpsDivider),
-            (CpuSection, CpuDivider), (GpuSection, GpuDivider), (RamSection, null)
+            (CpuSection, CpuDivider), (GpuSection, GpuDivider), (RamSection, RamDivider),
+            (NetworkSection, null)
         ];
         var visibleAfter = false;
         for (var index = modules.Length - 1; index >= 0; index--)
@@ -439,7 +460,56 @@ public partial class OverlayWindow : Window
     {
         if (!_sampling) _sampleTask = SampleAsync();
         if (!_telemetrySampling) _telemetryTask = SampleTelemetryAsync();
-        await Task.WhenAll(new[] { _sampleTask, _telemetryTask }.OfType<Task>());
+        BeginNetworkSample();
+        await Task.WhenAll(new[] { _sampleTask, _telemetryTask, _networkTask }.OfType<Task>());
+    }
+
+    public void SetNetworkSettingsVisible(bool visible)
+    {
+        if (visible && _loaded) BeginNetworkSample();
+    }
+
+    private void BeginNetworkSample()
+    {
+        if (!_initializeServices || _networkSampling || _closing) return;
+        _networkTask = SampleNetworkAsync();
+    }
+
+    private async Task SampleNetworkAsync()
+    {
+        if (_networkSampling || _closing) return;
+        _networkSampling = true;
+        var revision = _networkSelectionRevision;
+        try
+        {
+            var snapshot = await _network.SampleAsync(_shutdown.Token);
+            if (_closing || revision != _networkSelectionRevision) return;
+            NetworkSnapshot = snapshot;
+            RenderNetwork();
+            SnapshotsUpdated?.Invoke(this, EventArgs.Empty);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) { App.LogError(error); }
+        finally
+        {
+            _networkSampling = false;
+            if (!_closing && revision != _networkSelectionRevision) BeginNetworkSample();
+        }
+    }
+
+    private void RenderNetwork()
+    {
+        NetworkDownloadValue.Text = NetworkValueFormatter.FormatRate(NetworkSnapshot?.DownloadBytesPerSecond);
+        NetworkUploadValue.Text = NetworkValueFormatter.FormatRate(NetworkSnapshot?.UploadBytesPerSecond);
+        NetworkSection.ToolTip = NetworkSnapshot?.AdapterName ?? L10n.Text("Network adapter", "Сетевой адаптер");
+    }
+
+    internal void SetNetworkPreview(NetworkSnapshot snapshot)
+    {
+        if (_initializeServices) throw new InvalidOperationException("Preview data cannot replace live network measurements.");
+        NetworkSnapshot = snapshot;
+        RenderNetwork();
+        SnapshotsUpdated?.Invoke(this, EventArgs.Empty);
     }
 
     private void BeginTelemetrySample()
@@ -960,6 +1030,7 @@ public partial class OverlayWindow : Window
         _closing = true;
         CloseHudMenu();
         _sampleTimer.Stop(); _telemetryTimer.Stop(); _fpsTimer.Stop(); _volumeTimer.Stop(); _glowTimer.Stop();
+        _networkTimer.Stop();
         _volumePending = false;
         _updateCheckTimer.Stop();
         _shutdown.Cancel();
@@ -981,12 +1052,13 @@ public partial class OverlayWindow : Window
         _fps.Dispose();
         try
         {
-            var pending = new[] { _sampleTask, _telemetryTask, _volumeTask, _updateCheckTask, updatesStopped }.OfType<Task>().Concat(_musicCommands.ToArray());
+            var pending = new[] { _sampleTask, _telemetryTask, _networkTask, _volumeTask, _updateCheckTask, updatesStopped }.OfType<Task>().Concat(_musicCommands.ToArray());
             await Task.WhenAll(pending);
         }
         catch (OperationCanceledException) { }
         catch (Exception error) { App.LogError(error); }
         _media.Dispose(); _audio.Dispose(); _telemetry.Dispose();
+        _network.Dispose();
         _shutdown.Dispose();
     }
 

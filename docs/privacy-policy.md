@@ -13,13 +13,16 @@ To show the overlay and provide its controls, GlimHUD reads information exposed 
 - Peak audio levels from the selected music application when the optional panel glow's music response is enabled. Both glow styles use the same local level meter, and their baseline animations do not require audio input. The glow meter does not record audio or use microphone input.
 - Running process identities, executable paths, and the foreground window, to identify games and select an FPS target.
 - Presented-frame events through PresentMon and local CPU, GPU, memory, and available temperature readings.
+- Local network adapter names and identifiers, connection state, reported link speed, and cumulative received/sent byte counters, to calculate adapter traffic rates and session totals. These readings can include traffic from all applications and the local network. GlimHUD does not capture packets, inspect their destinations or payloads, or send network probes for this feature.
 - The Windows accent color when the system accent option is enabled.
 
 These values are used locally for the overlay and its settings. They are not sent to a GlimHUD service. GlimHUD does not inject a DLL into a game.
 
 ## Local storage and controls
 
-Preferences are stored at `%LOCALAPPDATA%\GlimHUD\settings.json`. They can include appearance, language, source selections, selected application identities, and game executable paths. Artwork may be held temporarily in memory for display; it is not a browsing or listening history database.
+Preferences are stored at `%LOCALAPPDATA%\GlimHUD\settings.json`. They can include appearance, language, source selections, selected application identities, game executable paths, and the selected network adapter identifier. Artwork may be held temporarily in memory for display; it is not a browsing or listening history database.
+
+Network byte counters are sampled locally about once per second during normal app operation. The optional HUD network module is hidden by default. Per-adapter session totals and the recent 60-second graph stay in memory and are cleared when GlimHUD closes; traffic history is not saved to disk. A saved adapter choice identifies a local interface, not a list of websites or connections.
 
 You can hide the music player, disable game-only visibility, select sources manually, or close the application from its tray menu. To remove saved preferences, close GlimHUD and delete its local settings file. Replacing or removing portable program files does not necessarily remove those preferences.
 
@@ -29,7 +32,7 @@ PresentMon and Windows may create local capture or diagnostic data as part of op
 
 Installed copies can check for updates through GitHub Pages and download an installer from this project's GitHub Releases. Automatic checks are enabled by default for installed copies and can be disabled in Settings. They run shortly after startup and about every six hours while the application is running. Manual checks and downloads happen only when requested; installation and restart always require the install button. Portable copies do not make these background update requests, and packaged copies use their distribution channel instead.
 
-Update requests retrieve public version metadata, its signature, and, when requested, the installer. They do not include track titles, audio levels, hardware readings, game paths, settings, or diagnostic logs. GitHub and its download infrastructure can receive ordinary connection information such as your IP address and request headers. Downloads are cached under `%LOCALAPPDATA%\GlimHUD\Updates`; a matching Ed25519 signature is required before an installer can run. GitHub's own privacy policy applies to its services.
+Update requests retrieve public version metadata, its signature, and, when requested, the installer. They do not include track titles, audio levels, hardware readings, network adapter identities or traffic counters, game paths, settings, or diagnostic logs. The network monitor itself does not make external requests. GitHub and its download infrastructure can receive ordinary connection information such as your IP address and request headers. Downloads are cached under `%LOCALAPPDATA%\GlimHUD\Updates`; a matching Ed25519 signature is required before an installer can run. GitHub's own privacy policy applies to its services.
 
 The development setup scripts download dependencies such as PresentMon, Inno Setup, and NetSparkle tools from their official sources when explicitly run. Opening support, source, or release links launches your browser and is governed by GitHub's privacy policy.
 

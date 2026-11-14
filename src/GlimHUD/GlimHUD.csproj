@@ -11,7 +11,7 @@
     <RootNamespace>GlimHUD</RootNamespace>
     <ApplicationIcon>Assets\GlimHUD.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.7.0</Version>
+    <Version>0.8.0</Version>
     <Product>GlimHUD</Product>
     <Description>Music and system telemetry above your game.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

@@ -20,6 +20,7 @@ public static class SettingsStore
             settings.BackgroundOpacity = double.IsFinite(settings.BackgroundOpacity) ? Math.Clamp(settings.BackgroundOpacity, 0.05, 0.85) : 0.30;
             settings.TextColor = NormalizeColor(settings.TextColor, "#F2F8FC");
             settings.BackgroundColor = NormalizeColor(settings.BackgroundColor, "#07121D");
+            settings.NetworkAdapterId = string.IsNullOrWhiteSpace(settings.NetworkAdapterId) ? null : settings.NetworkAdapterId.Trim();
             settings.GlowStyle = GlowStyles.Normalize(settings.GlowStyle);
             settings.GlowIntensity = double.IsFinite(settings.GlowIntensity) ? Math.Clamp(settings.GlowIntensity, 0, 1) : 0.65;
             settings.GlowSensitivity = double.IsFinite(settings.GlowSensitivity) ? Math.Clamp(settings.GlowSensitivity, 0, 1) : 0.75;

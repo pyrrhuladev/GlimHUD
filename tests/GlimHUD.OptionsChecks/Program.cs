@@ -44,6 +44,7 @@ try
         "Legacy settings keep experimental glow disabled with a useful music-response default.");
     Check(old.GlowStyle == GlowStyles.RainbowWave, "Legacy settings retain Rainbow Wave as the default glow style.");
     Check(old.GlowSensitivity == 0.75, "Legacy settings receive the music sensitivity default.");
+    Check(!old.ShowNetwork && old.NetworkAdapterId is null, "Legacy settings keep the network module hidden with automatic adapter selection.");
     File.WriteAllText(SettingsStore.FilePath, "{\"GlowEnabled\":true,\"GlowReactive\":false,\"GlowIntensity\":0.82}");
     var previousGlow = SettingsStore.Load();
     Check(previousGlow.GlowStyle == GlowStyles.RainbowWave && previousGlow.GlowEnabled
@@ -63,6 +64,8 @@ try
     old.GlowIntensity = 0.82;
     old.GlowSensitivity = 0.91;
     old.GlowStyle = GlowStyles.NeonFlow;
+    old.ShowNetwork = true;
+    old.NetworkAdapterId = "fixture-adapter";
     old.GameExecutablePaths = [@"D:\Games\Example.exe", @"d:\games\example.exe"];
     SettingsStore.Save(old);
     var saved = SettingsStore.Load();
@@ -74,14 +77,27 @@ try
         "Glow mode and intensity survive a restart independently of panel colors.");
     Check(saved.GlowStyle == GlowStyles.NeonFlow, "Neon Flow selection survives a restart.");
     Check(saved.GlowSensitivity == 0.91, "Music sensitivity survives a restart independently of glow intensity and style.");
+    Check(saved.ShowNetwork && saved.NetworkAdapterId == "fixture-adapter", "Network visibility and an explicit adapter survive a restart.");
     Check(saved.CustomAccentColor == "#E8845A" && !saved.UseWindowsAccent, "Custom accent survives a restart.");
     Check(saved.AutoShowInGames && !saved.ScrollMusicVolume && !saved.ShowMusic, "All optional switches survive a restart.");
     Check(saved.GameExecutablePaths.Count == 1, "Duplicate game paths are normalized case-insensitively.");
     saved.GlowStyle = GlowStyles.RainbowWave;
     saved.CheckForUpdates = true;
+    saved.ShowNetwork = false;
+    saved.NetworkAdapterId = null;
     SettingsStore.Save(saved);
     Check(SettingsStore.Load().GlowStyle == GlowStyles.RainbowWave, "Switching back to Rainbow Wave survives a restart.");
     Check(SettingsStore.Load().CheckForUpdates, "Re-enabling automatic update checks survives a restart.");
+    var automaticNetwork = SettingsStore.Load();
+    Check(!automaticNetwork.ShowNetwork && automaticNetwork.NetworkAdapterId is null,
+        "Hiding the network module and returning to automatic adapter selection survive a restart.");
+    File.WriteAllText(SettingsStore.FilePath, "{\"NetworkAdapterId\":\"   \",\"ShowNetwork\":true,\"Scale\":1.1}");
+    var blankNetwork = SettingsStore.Load();
+    Check(blankNetwork.NetworkAdapterId is null && blankNetwork.ShowNetwork && blankNetwork.Scale == 1.1,
+        "A blank adapter ID becomes automatic without discarding other settings.");
+    File.WriteAllText(SettingsStore.FilePath, "{\"NetworkAdapterId\":\" missing-adapter \"}");
+    Check(SettingsStore.Load().NetworkAdapterId == "missing-adapter",
+        "An explicit unavailable adapter ID is preserved after trimming so selection does not silently switch.");
     foreach (var unsupportedStyle in new string?[] { null, "future-style", "" })
     {
         File.WriteAllText(SettingsStore.FilePath, JsonSerializer.Serialize(new

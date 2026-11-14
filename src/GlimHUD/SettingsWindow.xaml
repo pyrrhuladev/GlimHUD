@@ -298,6 +298,48 @@
                             <TextBlock Text="{DynamicResource Loc.TelemetryHint}" Style="{StaticResource Muted}" Margin="0,13,0,0"/>
                         </StackPanel>
                     </Border>
+                    <Border x:Name="NetworkCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Loc.Network}" Style="{StaticResource SectionTitle}" Margin="0,0,0,15"/>
+                            <CheckBox x:Name="NetworkCheck" Content="{DynamicResource Loc.ShowNetwork}" Checked="Modules_Changed" Unchecked="Modules_Changed" Margin="0,0,0,10"/>
+                            <TextBlock Text="{DynamicResource Loc.NetworkAdapter}"/>
+                            <ComboBox x:Name="NetworkAdapterCombo" SelectionChanged="NetworkAdapter_Changed" AutomationProperties.Name="{DynamicResource Loc.NetworkAdapter}"/>
+                            <TextBlock x:Name="NetworkAdapterNameValue" FontWeight="SemiBold" Margin="0,9,0,3"/>
+                            <TextBlock x:Name="NetworkStatusText" Style="{StaticResource Muted}"/>
+                            <Border Background="#0B0E13" BorderBrush="#242933" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,10,10"><TextBlock Text="{DynamicResource Loc.NetworkDownload}" Style="{StaticResource Muted}"/><TextBlock x:Name="NetworkDownloadValue" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource AccentTextBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="8,0,0,10"><TextBlock Text="{DynamicResource Loc.NetworkUpload}" Style="{StaticResource Muted}"/><TextBlock x:Name="NetworkUploadValue" FontSize="18" FontWeight="SemiBold" Foreground="#DCB7F5" Margin="0,3,0,0"/></StackPanel>
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,10,0"><TextBlock Text="{DynamicResource Loc.NetworkReceived}" Style="{StaticResource Muted}"/><TextBlock x:Name="NetworkReceivedValue" Margin="0,3,0,0"/></StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="{DynamicResource Loc.NetworkSent}" Style="{StaticResource Muted}"/><TextBlock x:Name="NetworkSentValue" Margin="0,3,0,0"/></StackPanel>
+                                    </Grid>
+                                    <TextBlock Text="{DynamicResource Loc.NetworkSessionHint}" Style="{StaticResource Muted}" FontSize="11" Margin="0,9,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <DockPanel Margin="0,12,0,0"><TextBlock Text="{DynamicResource Loc.NetworkLinkSpeed}"/><TextBlock x:Name="NetworkLinkSpeedValue" DockPanel.Dock="Right" HorizontalAlignment="Right" FontWeight="SemiBold"/></DockPanel>
+                            <TextBlock Text="{DynamicResource Loc.NetworkLinkHint}" Style="{StaticResource Muted}" FontSize="11" Margin="0,4,0,0"/>
+                            <DockPanel Margin="0,13,0,6"><TextBlock Text="{DynamicResource Loc.NetworkHistory}" Style="{StaticResource Muted}"/><TextBlock x:Name="NetworkHistoryScaleValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource Muted}" FontSize="11"/></DockPanel>
+                            <Border Background="#0B0E13" BorderBrush="#242933" BorderThickness="1" CornerRadius="9" Padding="10">
+                                <Grid Height="72">
+                                    <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                    <Border Grid.Row="0" BorderBrush="#202630" BorderThickness="0,0,0,1"/>
+                                    <Border Grid.Row="1" BorderBrush="#202630" BorderThickness="0,0,0,1"/>
+                                    <Canvas x:Name="NetworkHistoryPlot" Grid.RowSpan="3" ClipToBounds="True" SizeChanged="NetworkHistory_SizeChanged" AutomationProperties.Name="{DynamicResource Loc.NetworkHistory}">
+                                        <Path x:Name="NetworkDownloadHistory" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeLineJoin="Round"/>
+                                        <Path x:Name="NetworkUploadHistory" Stroke="#DCB7F5" StrokeThickness="2" StrokeDashArray="4,3" StrokeLineJoin="Round"/>
+                                    </Canvas>
+                                    <TextBlock x:Name="NetworkHistoryEmpty" Grid.RowSpan="3" Text="{DynamicResource Loc.NetworkHistoryWaiting}" Style="{StaticResource Muted}" MaxWidth="300" TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                            <DockPanel Margin="0,5,0,0"><TextBlock Text="{DynamicResource Loc.NetworkHistoryStart}" Style="{StaticResource Muted}" FontSize="11"/><TextBlock Text="{DynamicResource Loc.NetworkHistoryNow}" DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource Muted}" FontSize="11"/></DockPanel>
+                            <TextBlock Text="{DynamicResource Loc.NetworkHint}" Style="{StaticResource Muted}" FontSize="11" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Border>
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="{DynamicResource Loc.Controls}" Style="{StaticResource SectionTitle}"/>
