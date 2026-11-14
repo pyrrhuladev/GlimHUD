@@ -45,6 +45,12 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'packaging\Assets') -Destination 
 foreach ($notice in @('LICENSE', 'THIRD-PARTY-NOTICES.md')) {
     if (Test-Path -LiteralPath (Join-Path $projectRoot $notice)) { Copy-Item -LiteralPath (Join-Path $projectRoot $notice) -Destination $stagingPath -Force }
 }
+$noticesSource = Join-Path $projectRoot 'Notices'
+if (Test-Path -LiteralPath $noticesSource -PathType Container) {
+    $noticesDestination = Join-Path $stagingPath 'Notices'
+    New-Item -ItemType Directory -Path $noticesDestination -Force | Out-Null
+    Get-ChildItem -LiteralPath $noticesSource -File | Copy-Item -Destination $noticesDestination -Force
+}
 [xml]$manifest = Get-Content -LiteralPath (Join-Path $projectRoot 'packaging\AppxManifest.xml') -Raw
 $manifest.Package.Identity.SetAttribute('Name', $IdentityName)
 $manifest.Package.Identity.SetAttribute('Publisher', $Publisher)

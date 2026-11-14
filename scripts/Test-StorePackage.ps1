@@ -40,6 +40,13 @@ if ($device.Name -ne 'Windows.Desktop' -or [version]$device.MinVersion -lt [vers
 foreach ($name in @('GlimHUD.exe', 'GlimHUD.dll', 'coreclr.dll', 'hostfxr.dll', 'PresentationFramework.dll', 'LICENSE', 'THIRD-PARTY-NOTICES.md')) {
     if (-not (Test-Path -LiteralPath (Join-Path $root $name) -PathType Leaf)) { throw "Missing payload file: $name" }
 }
+$thirdPartyIndex = Get-Content -LiteralPath (Join-Path $root 'THIRD-PARTY-NOTICES.md') -Raw
+foreach ($noticeLink in [regex]::Matches($thirdPartyIndex, '\]\((Notices/[^)]+)\)')) {
+    $noticePath = [IO.Path]::GetFullPath((Join-Path $root $noticeLink.Groups[1].Value))
+    if (-not $noticePath.StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $noticePath -PathType Leaf)) {
+        throw "Missing or invalid bundled license notice: $($noticeLink.Groups[1].Value)"
+    }
+}
 $executableStream = [IO.File]::OpenRead((Join-Path $root 'GlimHUD.exe'))
 $executableReader = [IO.BinaryReader]::new($executableStream)
 try {

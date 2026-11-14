@@ -7,7 +7,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$requiredNotices = @('LICENSE', 'THIRD-PARTY-NOTICES.md', 'Notices\LibreHardwareMonitor.txt', 'Notices\NAudio.txt')
+$requiredNotices = @(
+    'LICENSE', 'THIRD-PARTY-NOTICES.md', 'Notices\LibreHardwareMonitor.txt', 'Notices\NAudio.txt',
+    'Notices\HidSharp.txt', 'Notices\BlackSharp.Core.txt', 'Notices\DiskInfoToolkit.txt',
+    'Notices\RAMSPDToolkit-NDD.txt', 'Notices\Mono.Posix.NETStandard.txt',
+    'Notices\Microsoft.NET.txt', 'Notices\Microsoft.NET-ThirdParty.txt'
+)
 foreach ($relativePath in $requiredNotices) {
     $requiredPath = Join-Path $projectRoot $relativePath
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf) -or (Get-Item -LiteralPath $requiredPath).Length -eq 0) {
@@ -42,8 +47,17 @@ $arguments = @('publish', (Join-Path $projectRoot 'src\GlimHUD\GlimHUD.csproj'),
 if ($NoRestore) { $arguments += '--no-restore' }
 & $dotnet @arguments
 if ($LASTEXITCODE -ne 0) { throw "Publishing failed with exit code $LASTEXITCODE." }
-foreach ($name in @('LICENSE', 'README.md', 'THIRD-PARTY-NOTICES.md')) {
+foreach ($name in @('LICENSE', 'README.md', 'THIRD-PARTY-NOTICES.md', 'CONTRIBUTING.md', 'SECURITY.md')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $outputPath
+}
+$docsSource = Join-Path $projectRoot 'docs'
+if (Test-Path -LiteralPath $docsSource -PathType Container) {
+    Get-ChildItem -LiteralPath $docsSource -File -Recurse | Where-Object { $_.Extension -in '.md', '.txt' } | ForEach-Object {
+        $relativePath = $_.FullName.Substring($docsSource.Length).TrimStart('\', '/')
+        $destinationPath = Join-Path (Join-Path $outputPath 'docs') $relativePath
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destinationPath) -Force | Out-Null
+        Copy-Item -LiteralPath $_.FullName -Destination $destinationPath
+    }
 }
 $noticesOutput = Join-Path $outputPath 'Notices'
 New-Item -ItemType Directory -Path $noticesOutput -Force | Out-Null

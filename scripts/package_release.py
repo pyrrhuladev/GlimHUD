@@ -12,7 +12,11 @@ ROOT_FILES = (
     "LICENSE", "README.md", "THIRD-PARTY-NOTICES.md", "CONTRIBUTING.md", "SECURITY.md",
     "GlimHUD.slnx", "global.json", ".gitignore", ".editorconfig",
 )
-REQUIRED_NOTICES = ("Notices/LibreHardwareMonitor.txt", "Notices/NAudio.txt")
+REQUIRED_NOTICES = (
+    "Notices/LibreHardwareMonitor.txt", "Notices/NAudio.txt", "Notices/HidSharp.txt",
+    "Notices/BlackSharp.Core.txt", "Notices/DiskInfoToolkit.txt", "Notices/RAMSPDToolkit-NDD.txt",
+    "Notices/Mono.Posix.NETStandard.txt", "Notices/Microsoft.NET.txt", "Notices/Microsoft.NET-ThirdParty.txt",
+)
 EXCLUDED_DIRECTORIES = {
     "bin", "obj", ".git", ".codex", ".tools", ".packages", "__pycache__", ".vs",
     "artifacts", "node_modules", "nvidia corporation",
