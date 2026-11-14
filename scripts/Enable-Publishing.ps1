@@ -32,10 +32,32 @@ if ($privateBytes.Length -ne 32 -or $publicBytes.Length -ne 32 -or $publicKey -c
 $version = [string]($project.Project.PropertyGroup.Version | Select-Object -First 1)
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'The local project must have a stable three-component version.' }
 
+function Invoke-GitHubCommand {
+    param([string[]]$Arguments, [AllowNull()][string]$InputText)
+    # Windows PowerShell 5.1 turns redirected native stderr into ErrorRecords.
+    # Capture it without terminating before the CLI exit code can be inspected.
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        if ($PSBoundParameters.ContainsKey('InputText')) {
+            $response = @($InputText | & $gh @Arguments 2>&1)
+        } else {
+            $response = @(& $gh @Arguments 2>&1)
+        }
+        $exitCode = $LASTEXITCODE
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Output = @($response | ForEach-Object { $_.ToString() })
+        }
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+}
+
 function Invoke-GitHubJson([string[]]$Arguments) {
-    $response = @(& $gh @Arguments 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw "GitHub request failed ($($Arguments -join ' ')). Check authentication and repository permissions." }
-    try { return ($response -join "`n") | ConvertFrom-Json } catch { throw 'GitHub returned an unexpected response.' }
+    $response = Invoke-GitHubCommand -Arguments $Arguments
+    if ($response.ExitCode -ne 0) { throw "GitHub request failed ($($Arguments -join ' ')). Check authentication and repository permissions." }
+    try { return ($response.Output -join "`n") | ConvertFrom-Json } catch { throw 'GitHub returned an unexpected response.' }
 }
 
 function Get-MainFile([string]$Path) {
@@ -59,9 +81,9 @@ try {
     $remoteVersion = [string]($remoteProject.Project.PropertyGroup.Version | Select-Object -First 1)
     if ($remoteVersion -cne $version) { throw 'Remote main and the local project version differ. Push the current source first.' }
     # A 403/401/transport error must not be mistaken for a disabled Pages site.
-    $pagesResponse = @(& $gh api "repos/$repository/pages" --include 2>&1)
-    $pagesExists = $LASTEXITCODE -eq 0
-    $pageText = $pagesResponse -join "`n"
+    $pagesResponse = Invoke-GitHubCommand -Arguments @('api', "repos/$repository/pages", '--include')
+    $pagesExists = $pagesResponse.ExitCode -eq 0
+    $pageText = $pagesResponse.Output -join "`n"
     if (-not $pagesExists -and $pageText -notmatch '(?m)^HTTP/\S+\s+404\b') {
         throw 'Could not inspect GitHub Pages. Check repository administration and Pages permissions.'
     }
@@ -69,19 +91,19 @@ try {
 
     if ($PSCmdlet.ShouldProcess($repository, 'Store NETSPARKLE_PRIVATE_KEY as an Actions secret')) {
         # gh reads stdin by default; the seed is never placed in arguments or printed.
-        $secretResponse = @($privateKey | & $gh secret set NETSPARKLE_PRIVATE_KEY --repo $repository 2>&1)
-        if ($LASTEXITCODE -ne 0) { throw 'Could not store the update signing secret. Check Actions secret permissions.' }
+        $secretResponse = Invoke-GitHubCommand -Arguments @('secret', 'set', 'NETSPARKLE_PRIVATE_KEY', '--repo', $repository) -InputText $privateKey
+        if ($secretResponse.ExitCode -ne 0) { throw 'Could not store the update signing secret. Check Actions secret permissions.' }
         Write-Output 'Actions update-signing secret configured.'
     }
     $method = if ($pagesExists) { 'PUT' } else { 'POST' }
     if ($PSCmdlet.ShouldProcess($repository, 'Configure GitHub Pages with GitHub Actions as its source')) {
-        $configureResponse = @(& $gh api "repos/$repository/pages" --method $method -f build_type=workflow 2>&1)
-        if ($LASTEXITCODE -ne 0) { throw 'Could not enable GitHub Pages Actions deployment. The signing secret is already configured; rerun after fixing Pages permissions.' }
+        $configureResponse = Invoke-GitHubCommand -Arguments @('api', "repos/$repository/pages", '--method', $method, '-f', 'build_type=workflow')
+        if ($configureResponse.ExitCode -ne 0) { throw 'Could not enable GitHub Pages Actions deployment. The signing secret is already configured; rerun after fixing Pages permissions.' }
         Write-Output 'GitHub Pages configured to deploy through Actions.'
     }
     if ($StartRelease -and $PSCmdlet.ShouldProcess($repository, "Start Release for version $version from main")) {
-        $dispatchResponse = @(& $gh workflow run release.yml --repo $repository --ref main -f "version=$version" 2>&1)
-        if ($LASTEXITCODE -ne 0) { throw 'Could not start Release. Open repository Actions and run the Release workflow on main.' }
+        $dispatchResponse = Invoke-GitHubCommand -Arguments @('workflow', 'run', 'release.yml', '--repo', $repository, '--ref', 'main', '-f', "version=$version")
+        if ($dispatchResponse.ExitCode -ne 0) { throw 'Could not start Release. Open repository Actions and run the Release workflow on main.' }
         Write-Output "Release $version requested: https://github.com/$repository/actions/workflows/release.yml"
         Write-Output 'A successful release automatically deploys the product page and signed update feed.'
     } elseif (-not $StartRelease) {
