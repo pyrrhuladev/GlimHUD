@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.1 - 2026-11-14
+
+### Fixed
+
+- Automatic FPS targeting retains the selected game during brief focus changes to known recording-control windows, instead of switching to a recording helper's own low-rate or missing frame stream. Stale game data still expires normally.
+- Distinguished nonfatal PresentMon warnings from actual capture-permission failures, avoiding an unnecessary administrator-required status after a successful collection.
+- Added CPU-temperature access states for missing PawnIO, denied or unavailable driver access, and a sensor without a reading. Previously unavailable driver access can trigger a bounded sensor reinitialization; missing values are not classified as unsupported CPUs.
+
+### Added
+
+- An on-demand **Copy diagnostics** action for local CPU/sensor and FPS/capture troubleshooting. The bounded clipboard report excludes media, window titles, paths, network identifiers, and serial numbers; nothing is uploaded automatically.
+- The unchanged, vendor-signed official PawnIO 2.2.0 installer in both setup and portable releases. The default-selected optional CPU-driver task installs missing or known older versions through Windows UAC; an existing version of 2.2 or newer is retained, and unknown existing versions are left unchanged.
+- A Settings action to install the bundled CPU driver without a second download, plus an official website help link. Cancellation or failure leaves GlimHUD usable; restart-required results are reported without automatically rebooting Windows. The shared system driver remains installed when GlimHUD is removed.
+- Build-time checks for the bundled installer's pinned size, SHA-256, Authenticode signer, and provenance, plus its separate redistribution notice. GlimHUD does not change Windows security policies.
+- License notices and source information for the signed PawnIO modules already embedded in LibreHardwareMonitor.
+
 ## 0.9.0 - 2026-11-14
 
 ### Added

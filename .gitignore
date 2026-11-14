@@ -21,4 +21,6 @@ NVIDIA Corporation/
 .env.*
 !.env.example
 __pycache__/
+tools/PawnIO/PawnIO_setup.exe
+tools/PawnIO/*.download
 *.priv

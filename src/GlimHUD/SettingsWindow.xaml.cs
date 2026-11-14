@@ -30,6 +30,10 @@ public partial class SettingsWindow : Window
     private bool _updateLinkFailed;
     private bool _isClosed;
     private IReadOnlyList<NetworkAdapterInfo> _networkAdapters = [];
+    private bool _pawnIoLinkFailed;
+    private bool _installingCpuDriver;
+    private string? _cpuDriverInstallMessage;
+    private bool _cpuDriverInstallFailed;
 
     public SettingsWindow(OverlayWindow overlay)
     {
@@ -161,6 +165,7 @@ public partial class SettingsWindow : Window
             UpdateChoices(GpuCombo, gpuChoices, _overlay.Settings.GpuIdentifier);
             HardwareStatus.Text = hardware is null ? L10n.Text("Connecting to sensors…", "Подключение датчиков…") : string.Join("\n", new[] { hardware.CpuName, hardware.Status }.Where(value => !string.IsNullOrWhiteSpace(value)));
             FpsStatus.Text = _overlay.FpsSnapshot?.Status ?? L10n.Text("Connecting to the frame counter…", "Подключение счётчика кадров…");
+            RefreshCpuTemperatureDiagnostics(hardware);
             var fps = _overlay.FpsSnapshot;
             FpsRecoveryActions.Visibility = fps is { IsRunning: false } ? Visibility.Visible : Visibility.Collapsed;
             RestartAdminButton.Visibility = fps is { RequiresElevation: true } && AppRestartService.CanRequestElevation
@@ -195,6 +200,133 @@ public partial class SettingsWindow : Window
         _overlay.Settings.GlowReactive = GlowReactiveCheck.IsChecked == true;
         UpdateGlowControls();
         ApplyAndSave();
+    }
+
+    private void RefreshCpuTemperatureDiagnostics(TelemetrySnapshot? hardware)
+    {
+        var state = hardware?.CpuTemperatureState;
+        var access = hardware?.CpuTemperatureAccess;
+        var canElevate = state == CpuTemperatureState.AccessDenied && AppRestartService.CanRequestElevation;
+        var showWebsite = state is CpuTemperatureState.DriverMissing or CpuTemperatureState.DriverUnavailable
+            || state is not (null or CpuTemperatureState.Ready or CpuTemperatureState.Disabled) && access?.DriverInstalled == false;
+        CpuTemperatureValue.Text = hardware?.CpuTemperatureCelsius is { } temperature && double.IsFinite(temperature)
+            ? FormatUi("Loc.CpuTemperatureValue", temperature) : "-";
+        CpuTemperatureStateText.SetResourceReference(TextBlock.TextProperty, state switch
+        {
+            CpuTemperatureState.Ready => "Loc.CpuTemperatureReady",
+            CpuTemperatureState.Disabled => "Loc.CpuTemperatureDisabled",
+            CpuTemperatureState.DriverMissing => "Loc.CpuTemperatureDriverMissing",
+            CpuTemperatureState.AccessDenied => "Loc.CpuTemperatureAccessDenied",
+            CpuTemperatureState.DriverUnavailable => "Loc.CpuTemperatureDriverUnavailable",
+            CpuTemperatureState.SensorUnavailable => "Loc.CpuTemperatureSensorUnavailable",
+            _ => "Loc.CpuTemperatureWaiting"
+        });
+        var help = state switch
+        {
+            CpuTemperatureState.DriverMissing => "Loc.CpuTemperatureDriverMissingHelp",
+            CpuTemperatureState.DriverUnavailable => "Loc.CpuTemperatureDriverUnavailableHelp",
+            CpuTemperatureState.AccessDenied => canElevate ? "Loc.CpuTemperatureElevationHint" : "Loc.CpuTemperatureAccessHelp",
+            CpuTemperatureState.SensorUnavailable => "Loc.CpuTemperatureSensorHelp",
+            _ => null
+        };
+        CpuTemperatureHelp.Visibility = help is null ? Visibility.Collapsed : Visibility.Visible;
+        if (help is not null) CpuTemperatureHelp.SetResourceReference(TextBlock.TextProperty, help);
+        var details = new List<string>();
+        if (state == CpuTemperatureState.Ready)
+        {
+            var source = hardware?.CpuTemperatureSensors.FirstOrDefault(sensor => sensor.IsSelected)?.Name;
+            if (!string.IsNullOrWhiteSpace(source)) details.Add(FormatUi("Loc.CpuTemperatureSource", BoundedCpuDetail(source, 80)));
+        }
+        else if (access is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(access.DriverVersion))
+                details.Add(FormatUi("Loc.CpuTemperatureDriverVersion", BoundedCpuDetail(access.DriverVersion, 32)));
+            if (access.DeviceOpenError is { } error) details.Add(FormatUi("Loc.CpuTemperatureDeviceError", error));
+        }
+        CpuTemperatureDetails.Text = string.Join(" · ", details);
+        CpuTemperatureDetails.Visibility = details.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        CpuTemperatureRestartButton.Visibility = canElevate ? Visibility.Visible : Visibility.Collapsed;
+        CpuTemperatureRestartButton.IsEnabled = !_requestingRestart && !_installingCpuDriver;
+        PawnIoButton.Visibility = showWebsite ? Visibility.Visible : Visibility.Collapsed;
+        PawnIoButton.IsEnabled = !_installingCpuDriver && !_requestingRestart;
+        PawnIoButton.SetResourceReference(System.Windows.Controls.Button.ContentProperty,
+            _installingCpuDriver ? "Loc.PawnIoInstalling" : "Loc.PawnIoInstall");
+        PawnIoWebsiteButton.Visibility = showWebsite ? Visibility.Visible : Visibility.Collapsed;
+        CpuTemperatureActions.Visibility = canElevate || showWebsite ? Visibility.Visible : Visibility.Collapsed;
+        PawnIoInstallStatusText.Visibility = _cpuDriverInstallMessage is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_cpuDriverInstallMessage is not null)
+            PawnIoInstallStatusText.SetResourceReference(TextBlock.TextProperty, _cpuDriverInstallMessage);
+        if (_cpuDriverInstallFailed) PawnIoInstallStatusText.Foreground = new SolidColorBrush(Color.FromRgb(246, 162, 159));
+        else PawnIoInstallStatusText.ClearValue(TextBlock.ForegroundProperty);
+        PawnIoLinkStatus.Visibility = _pawnIoLinkFailed ? Visibility.Visible : Visibility.Collapsed;
+        if (_pawnIoLinkFailed) PawnIoLinkStatus.Text = FormatUi("Loc.ProjectLinkFailed", ProjectLinks.PawnIoUrl);
+    }
+
+    private static string BoundedCpuDetail(string value, int maximum)
+    {
+        var text = new string(value.Select(character => char.IsControl(character) ? ' ' : character).ToArray()).Trim();
+        return text.Length <= maximum ? text : text[..(maximum - 1)] + "…";
+    }
+
+    private void OpenPawnIo_Click(object sender, RoutedEventArgs e)
+    {
+        _pawnIoLinkFailed = !ProjectLinks.TryOpen(ProjectLinks.PawnIoUrl);
+        RefreshCpuTemperatureDiagnostics(_overlay.TelemetrySnapshot);
+    }
+
+    private async void InstallCpuDriver_Click(object sender, RoutedEventArgs e)
+    {
+        if (_installingCpuDriver || _requestingRestart || _isClosed) return;
+        _installingCpuDriver = true;
+        _cpuDriverInstallFailed = false;
+        _cpuDriverInstallMessage = "Loc.PawnIoInstalling";
+        RestartAdminButton.IsEnabled = false;
+        RefreshCpuTemperatureDiagnostics(_overlay.TelemetrySnapshot);
+        try
+        {
+            var result = await _overlay.InstallCpuDriverAsync();
+            _cpuDriverInstallFailed = result.Status is PawnIoInstallStatus.Failed or PawnIoInstallStatus.Unavailable;
+            _cpuDriverInstallMessage = result.Status switch
+            {
+                PawnIoInstallStatus.Installed => result.ErrorCode == "AlreadyInstalled" ? "Loc.PawnIoAlreadyInstalled" : "Loc.PawnIoInstalled",
+                PawnIoInstallStatus.RebootRequired => "Loc.PawnIoRebootRequired",
+                PawnIoInstallStatus.Cancelled => "Loc.PawnIoInstallCancelled",
+                PawnIoInstallStatus.Unavailable => result.ErrorCode == "InstalledVersionUnknown" ? "Loc.PawnIoVersionUnknown" : "Loc.PawnIoInstallUnavailable",
+                _ => "Loc.PawnIoInstallFailed"
+            };
+        }
+        catch (Exception error)
+        {
+            App.LogError(error);
+            _cpuDriverInstallFailed = true;
+            _cpuDriverInstallMessage = "Loc.PawnIoInstallFailed";
+        }
+        finally
+        {
+            _installingCpuDriver = false;
+            if (!_isClosed)
+            {
+                RestartAdminButton.IsEnabled = !_requestingRestart;
+                RefreshCpuTemperatureDiagnostics(_overlay.TelemetrySnapshot);
+            }
+        }
+    }
+
+    private void CopyDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        string status;
+        try
+        {
+            System.Windows.Clipboard.SetText(_overlay.GetDiagnosticReport());
+            status = "Loc.DiagnosticsCopied";
+        }
+        catch (System.Runtime.InteropServices.ExternalException error)
+        {
+            App.LogError(error);
+            status = "Loc.DiagnosticsCopyFailed";
+        }
+        CopyDiagnosticsStatus.SetResourceReference(TextBlock.TextProperty, status);
+        CopyDiagnosticsStatus.Visibility = Visibility.Visible;
     }
 
     private void RefreshNetworkControls()
@@ -927,9 +1059,10 @@ public partial class SettingsWindow : Window
 
     private async void RestartAdmin_Click(object sender, RoutedEventArgs e)
     {
-        if (_requestingRestart) return;
+        if (_requestingRestart || _installingCpuDriver) return;
         _requestingRestart = true;
         RestartAdminButton.IsEnabled = false;
+        CpuTemperatureRestartButton.IsEnabled = false;
         try
         {
             if (System.Windows.Application.Current is App app)
@@ -947,6 +1080,7 @@ public partial class SettingsWindow : Window
         {
             _requestingRestart = false;
             RestartAdminButton.IsEnabled = true;
+            CpuTemperatureRestartButton.IsEnabled = true;
         }
     }
     private static string? SelectedKey(ComboBox combo) => combo.SelectedValue is string value && value.Length > 0 ? value : null;

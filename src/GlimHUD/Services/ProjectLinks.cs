@@ -2,13 +2,14 @@ using System.Diagnostics;
 
 namespace GlimHUD.Services;
 
-/// <summary>Official project destinations. A link is opened only after an explicit UI action.</summary>
+/// <summary>Official project and hardware-support destinations, opened only after an explicit UI action.</summary>
 public static class ProjectLinks
 {
     public const string RepositoryUrl = "https://github.com/pyrrhuladev/GlimHUD";
     public const string IssuesUrl = RepositoryUrl + "/issues";
     public const string ReleasesUrl = RepositoryUrl + "/releases";
     public const string WebsiteUrl = "https://pyrrhuladev.github.io/GlimHUD/";
+    public const string PawnIoUrl = "https://pawnio.eu/";
 
     public static bool TryOpen(string? url) => TryOpen(url, info =>
     {
@@ -17,9 +18,9 @@ public static class ProjectLinks
 
     internal static bool TryOpen(string? url, Action<ProcessStartInfo> launch)
     {
-        // Buttons expose official project destinations; never pass arbitrary
+        // Buttons expose official project/support destinations; never pass arbitrary
         // protocols, local paths or executable arguments to the shell.
-        if (url is not (RepositoryUrl or IssuesUrl or ReleasesUrl or WebsiteUrl)) return false;
+        if (url is not (RepositoryUrl or IssuesUrl or ReleasesUrl or WebsiteUrl or PawnIoUrl)) return false;
         try
         {
             launch(new ProcessStartInfo(url) { UseShellExecute = true });

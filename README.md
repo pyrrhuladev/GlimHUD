@@ -29,7 +29,7 @@ A transparent Windows overlay for music controls, FPS, CPU, GPU, memory, and net
 
 ## Download and use
 
-Download the [Windows x64 installer](https://github.com/pyrrhuladev/GlimHUD/releases/latest/download/GlimHUD-Setup-x64.exe) from the [product page](https://pyrrhuladev.github.io/GlimHUD/). It installs for your Windows account without administrator access. The installer includes the .NET runtime.
+Download the [Windows x64 installer](https://github.com/pyrrhuladev/GlimHUD/releases/latest/download/GlimHUD-Setup-x64.exe) from the [product page](https://pyrrhuladev.github.io/GlimHUD/). GlimHUD installs for your Windows account and includes the .NET runtime. An optional CPU-temperature driver task, selected by default when PawnIO is missing or older, can request administrator approval through Windows UAC for the bundled official PawnIO installer. Cancelling that request does not cancel the GlimHUD installation.
 
 For a portable copy, download [GlimHUD-win-x64.zip](https://github.com/pyrrhuladev/GlimHUD/releases/latest/download/GlimHUD-win-x64.zip), extract the complete ZIP, and start `GlimHUD.exe`. Keep all extracted files together. Additional builds and checksums are available in [GitHub Releases](https://github.com/pyrrhuladev/GlimHUD/releases). Framework-dependent source builds require the [.NET 10 Desktop Runtime for x64](https://dotnet.microsoft.com/download/dotnet/10.0).
 
@@ -75,7 +75,7 @@ The network settings show the selected adapter's live rates, received/sent total
 
 When GlimHUD is elevated, a requested update is handed to the normal Explorer desktop for the same Windows account so the installer stays per-user. If that desktop is unavailable, elevated, or belongs to another account, GlimHUD does not launch the installer as administrator. Restart GlimHUD normally or download the installer from Releases and run it normally. Entering another account's credentials at UAC also runs the HUD with that account's separate settings and data locations.
 
-Windows publisher signing (Authenticode) is not configured yet, so Windows may show an unknown-publisher or SmartScreen warning. Update signatures authenticate project updates; they do not provide a verified Windows publisher identity. There is no published Microsoft Store listing. See [distribution and release setup](docs/distribution.md) for the website, installer, and update pipeline, or [Microsoft Store preparation](docs/microsoft-store.md) for the separate MSIX work.
+Windows publisher signing (Authenticode) for GlimHUD is not configured yet, so Windows may show an unknown-publisher or SmartScreen warning. The bundled official PawnIO installer retains its vendor's own digital signature. Update signatures authenticate project updates; they do not provide a verified Windows publisher identity for GlimHUD. There is no published Microsoft Store listing. See [distribution and release setup](docs/distribution.md) for the website, installer, and update pipeline, or [Microsoft Store preparation](docs/microsoft-store.md) for the separate MSIX work.
 
 ## Data sources and limits
 
@@ -85,9 +85,19 @@ CPU usage uses Windows Processor Utility, which accounts for clock speed and boo
 
 RAM and performance counters have native Windows data sources. Optional temperature sensors use LibreHardwareMonitor; available readings depend on hardware, drivers, and permissions. An unavailable measurement is shown as a dash. The startup administrator option uses the normal Windows UAC prompt and never changes Windows security policy or group membership.
 
+**CPU temperature** through LibreHardwareMonitorLib 0.9.6 needs low-level access through the separate PawnIO driver. Both the GlimHUD installer and portable ZIP include the unchanged, digitally signed official PawnIO 2.2.0 installer, so no second download is needed. The optional driver task installs missing or known older versions; an installed version of 2.2 or newer is kept. An existing installation whose version cannot be established is left unchanged to avoid a downgrade.
+
+Portable users and existing installations can use the PawnIO install action in Settings to start the bundled official installer with Windows UAC approval. If approval is cancelled or installation fails, GlimHUD continues to work while CPU temperature may remain unavailable. A successful driver installation can require a Windows restart; GlimHUD never restarts Windows automatically. Relaunch GlimHUD after any required restart. It can also retry sensor initialization when previously unavailable driver access becomes available. Settings retains an [official PawnIO website](https://pawnio.eu/) help link.
+
+A supported CPU such as the Intel Core i5-10400F can show normal CPU load while its temperature is unavailable because the driver is missing or inaccessible. Administrator access alone does not supply a missing driver, and a successful driver installation does not guarantee a sensor reading. Settings distinguishes missing PawnIO, denied or unavailable device access, and a sensor that still has no reading. The unsigned developer edition and Windows security-policy changes are not needed. PawnIO is a system component shared with other applications and remains installed when GlimHUD is removed; manage it separately in Windows Installed apps. Its official installer has separate [redistribution terms](THIRD-PARTY-NOTICES.md); the [open-source driver project](https://github.com/namazso/PawnIO) and the library's hardware-access modules retain their own licenses.
+
 Network readings use local Windows interface counters sampled about once per second, with rates calculated from byte-counter differences and actual elapsed time. GlimHUD measures one selected adapter at a time rather than adding physical and VPN traffic together. It does not capture packets, inspect their destinations or payloads, send probes, or require administrator access for this module. The 60-second history stays in memory; disconnected or invalid intervals appear as gaps. Network-interface and driver limitations can make a reading unavailable.
 
 FPS uses [PresentMon](https://github.com/GameTechDev/PresentMon) to count presented frames. This is not the display refresh rate or the overlay's own frame rate. ETW capture can require additional permissions. The startup UAC request can provide them; Settings also offers an administrator restart when access is denied. Cancelling a UAC prompt keeps the current app running. The other overlay features work when FPS capture is unavailable. Choose a game manually when automatic process selection is unsuitable.
+
+In automatic mode, brief focus changes to known recording-control windows keep the selected game as the FPS target. Recording helpers are excluded from the frame stream so their own low frame rate does not replace the game's reading. An expired game stream still becomes unavailable; GlimHUD does not invent or smooth a replacement FPS value. This does not guarantee that recording cannot reduce a game's actual performance.
+
+For troubleshooting, **Copy diagnostics** in Settings generates a bounded local JSON report and copies it to your clipboard only when clicked. It includes CPU temperature/access information and FPS target, frame age, swapchain, and collector status, plus app/OS/permission context. It excludes media information, window titles, file paths, network identifiers, and serial numbers. Review the report before choosing to paste it into a GitHub issue; GlimHUD does not upload it.
 
 Game-only display is optional. Recognition uses known game installation paths and exact executable paths selected by the user; browsers and launchers are excluded where identifiable. Windowed and borderless modes are the intended targets. Exclusive fullscreen and individual anti-cheat systems need separate compatibility testing.
 
@@ -99,12 +109,13 @@ Install the [.NET 10 SDK for Windows x64](https://dotnet.microsoft.com/download/
 
 ```powershell
 .\scripts\Get-PresentMon.ps1
+.\scripts\Get-PawnIO.ps1
 .\scripts\Build.ps1
 .\scripts\Test.ps1
 .\scripts\Publish.ps1 -SelfContained
 ```
 
-Published files are written to `artifacts\GlimHUD-win-x64`. Keep all files in that directory together. PresentMon 2.6.0 is downloaded from its official upstream release and checked against its SHA-256 digest. It can be omitted for a build without FPS capture.
+Published files are written to `artifacts\GlimHUD-win-x64`. Keep all files in that directory together. PresentMon 2.6.0 is downloaded from its official upstream release and checked against its SHA-256 digest. It can be omitted for a build without FPS capture. `Get-PawnIO.ps1` fetches the pinned official PawnIO 2.2.0 installer, checks its size, SHA-256, valid Authenticode signature and pinned signer, and writes provenance for packaging. It does not run the installer. Release packages require this complete unchanged installer and its notices.
 
 To build the optional installer, run `scripts/Get-InnoSetup.ps1`, then `scripts/Build-Installer.ps1 -InputDirectory artifacts/GlimHUD-win-x64`. This compiles the installer without installing or starting it. Release automation and signing-key setup are documented in [distribution.md](docs/distribution.md).
 

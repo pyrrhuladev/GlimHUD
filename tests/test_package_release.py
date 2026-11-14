@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import sys
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
 from zipfile import ZipFile
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -25,6 +27,14 @@ class ReleaseArchiveChecks(unittest.TestCase):
             for relative in ("LICENSE", "THIRD-PARTY-NOTICES.md", *REQUIRED_NOTICES):
                 self.write(folder, relative)
         self.write(self.binary, "GlimHUD.exe")
+        pawnio = b"Pinned official setup fixture - never executed."
+        self.expected_pawnio = patch("package_release.PAWNIO_SETUP_SHA256", hashlib.sha256(pawnio).hexdigest())
+        self.expected_pawnio.start()
+        self.addCleanup(self.expected_pawnio.stop)
+        for folder in (self.root, self.binary):
+            setup = self.write(folder, "tools/PawnIO/PawnIO_setup.exe")
+            setup.write_bytes(pawnio)
+            self.write(folder, "tools/PawnIO/provenance.json")
 
     @staticmethod
     def write(folder: Path, relative: str) -> Path:
@@ -87,6 +97,35 @@ class ReleaseArchiveChecks(unittest.TestCase):
     def test_missing_update_crypto_license_stops_release(self) -> None:
         (self.binary / "Notices/NetSparkle.Chaos.NaCl.txt").unlink()
         with self.assertRaisesRegex(ValueError, "NetSparkle.Chaos.NaCl"):
+            self.archive_names()
+        self.assertFalse(self.output.exists())
+
+    def test_missing_embedded_pawnio_notice_stops_release(self) -> None:
+        for folder in (self.root, self.binary):
+            for name in (
+                "Notices/PawnIO.Modules.txt", "Notices/PawnIO.Modules.LGPL-2.1.txt",
+                "Notices/PawnIO.Modules.Upstream-README.txt",
+            ):
+                with self.subTest(folder=folder.name, notice=name):
+                    (folder / name).unlink()
+                    with self.assertRaisesRegex(ValueError, "PawnIO.Modules"):
+                        self.archive_names()
+                    self.assertFalse(self.output.exists())
+                    self.write(folder, name)
+
+    def test_missing_driver_redistribution_notice_stops_release(self) -> None:
+        (self.binary / "Notices/PawnIO.Setup.txt").unlink()
+        with self.assertRaisesRegex(ValueError, "PawnIO.Setup"):
+            self.archive_names()
+        self.assertFalse(self.output.exists())
+
+    def test_missing_or_changed_bundled_pawnio_setup_stops_release(self) -> None:
+        installer = self.binary / "tools/PawnIO/PawnIO_setup.exe"
+        installer.unlink()
+        with self.assertRaisesRegex(ValueError, "PawnIO_setup"):
+            self.archive_names()
+        installer.write_bytes(b"Changed setup fixture")
+        with self.assertRaisesRegex(ValueError, "pinned official"):
             self.archive_names()
         self.assertFalse(self.output.exists())
 

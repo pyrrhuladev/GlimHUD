@@ -20,6 +20,10 @@ public sealed record FpsSnapshot(
     public int ObservedProcessCount { get; init; }
     public long ParsedFrameCount { get; init; }
     public long RejectedFrameRowCount { get; init; }
+    public string? SelectedSwapChain { get; init; }
+    public int ObservedSwapChainCount { get; init; }
+    public double? FrameDataAgeMilliseconds { get; init; }
+    public string? LastCaptureDiagnostic { get; init; }
 }
 
 public sealed record FpsProcessTarget(int ProcessId, string ProcessName, string WindowTitle)
@@ -33,14 +37,6 @@ public sealed record FpsProcessTarget(int ProcessId, string ProcessName, string 
 /// </summary>
 public sealed class PresentMonService : IDisposable
 {
-    private static readonly HashSet<string> IgnoredProcesses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "GlimHUD", "dwm", "explorer", "ShellExperienceHost", "StartMenuExperienceHost",
-        "SearchHost", "SearchApp", "TextInputHost", "ApplicationFrameHost", "LockApp",
-        "Taskmgr", "SystemSettings", "steam", "steamwebhelper", "EpicGamesLauncher",
-        "EpicWebHelper", "Battle.net", "Agent", "EADesktop", "EABackgroundService"
-    };
-
     private readonly object _gate = new();
     private readonly string? _executablePath;
     private readonly string _sessionName = $"GlimHUD-{Environment.ProcessId}-{Guid.NewGuid():N}";
@@ -122,7 +118,7 @@ public sealed class PresentMonService : IDisposable
             // has exited. Do not mask permission errors behind stale target state.
             if (!_running)
                 return new(null, processId, name ?? _targetName, _status(), _executablePath is not null, false, _pinnedProcessId.HasValue)
-                { RequiresElevation = _etwAccessDenied };
+                { RequiresElevation = _etwAccessDenied, LastCaptureDiagnostic = _lastError };
             if (processId.HasValue && name is null)
             {
                 if (!_pinnedProcessId.HasValue) _automaticProcessId = null;
@@ -133,14 +129,20 @@ public sealed class PresentMonService : IDisposable
             if (!processId.HasValue)
                 return new(null, null, string.Empty, L10n.Text("Open a game or select a process in Settings", "Откройте игру или выберите процесс в настройках"), true, true, false);
 
-            var fps = _frames.GetFramesPerSecond(processId.Value, Stopwatch.GetTimestamp());
+            var now = Stopwatch.GetTimestamp();
+            var fps = _frames.GetFramesPerSecond(processId.Value, now);
+            var frameState = _frames.GetDiagnostics(processId.Value, now);
             return new(fps, processId, _targetName,
                 fps.HasValue ? L10n.Text("{0} · Presented FPS", "{0} · FPS приложения", _targetName) : GetWaitingStatus(processId.Value),
                 true, true, _pinnedProcessId.HasValue)
             {
                 ObservedProcessCount = _observedProcesses.Count,
                 ParsedFrameCount = _parsedFrameCount,
-                RejectedFrameRowCount = _rejectedFrameRowCount
+                RejectedFrameRowCount = _rejectedFrameRowCount,
+                SelectedSwapChain = frameState.SwapChain,
+                ObservedSwapChainCount = frameState.StreamCount,
+                FrameDataAgeMilliseconds = frameState.AgeMilliseconds,
+                LastCaptureDiagnostic = _lastError
             };
         }
     }
@@ -154,7 +156,7 @@ public sealed class PresentMonService : IDisposable
             {
                 try
                 {
-                    if (process.Id == Environment.ProcessId || IgnoredProcesses.Contains(process.ProcessName)) continue;
+                    if (process.Id == Environment.ProcessId || FpsForegroundTargetPolicy.IsIgnoredProcess(process.ProcessName)) continue;
                     if (process.MainWindowHandle == IntPtr.Zero || string.IsNullOrWhiteSpace(process.MainWindowTitle)) continue;
                     targets.Add(new(process.Id, process.ProcessName, process.MainWindowTitle));
                 }
@@ -230,7 +232,7 @@ public sealed class PresentMonService : IDisposable
             await errorsTask.ConfigureAwait(false);
             lock (_gate)
             {
-                if (process.ExitCode == 5 || _etwAccessDenied)
+                if (process.ExitCode is 5 or 1314 || _etwAccessDenied)
                 {
                     _etwAccessDenied = true;
                     SetStatus("Windows denied FPS capture access. Use Restart as administrator in Settings, then return to your game.", "Windows запретила захват FPS. В настройках выберите перезапуск от администратора, затем вернитесь в игру.");
@@ -246,7 +248,8 @@ public sealed class PresentMonService : IDisposable
         {
             lock (_gate)
             {
-                _etwAccessDenied |= ex is UnauthorizedAccessException || ex is System.ComponentModel.Win32Exception { NativeErrorCode: 5 };
+                _etwAccessDenied |= ex is UnauthorizedAccessException
+                    || ex is System.ComponentModel.Win32Exception { NativeErrorCode: 5 or 1314 };
                 if (_etwAccessDenied)
                     SetStatus("Windows denied FPS capture access. Use Restart as administrator in Settings, then return to your game.", "Windows запретила захват FPS. В настройках выберите перезапуск от администратора, затем вернитесь в игру.");
                 else
@@ -271,15 +274,23 @@ public sealed class PresentMonService : IDisposable
         }
     }
 
-    internal static IReadOnlyList<string> GetCaptureArguments(string sessionName) =>
-    [
-        "--output_stdout", "--no_console_stats", "--v1_metrics",
-        "--no_track_gpu", "--no_track_input",
-        // Keep display/kernel present tracking enabled. Disabling it removes
-        // Flip/Present events needed by non-DXGI runtimes such as native Vulkan.
-        "--session_name", sessionName,
-        "--exclude", "GlimHUD.exe", "--exclude", "dwm.exe"
-    ];
+    internal static IReadOnlyList<string> GetCaptureArguments(string sessionName)
+    {
+        List<string> arguments =
+        [
+            "--output_stdout", "--no_console_stats", "--v1_metrics",
+            "--no_track_gpu", "--no_track_input",
+            // Keep display/kernel present tracking enabled. Disabling it removes
+            // Flip/Present events needed by non-DXGI runtimes such as native Vulkan.
+            "--session_name", sessionName
+        ];
+        foreach (var processName in FpsForegroundTargetPolicy.CaptureExclusions)
+        {
+            arguments.Add("--exclude");
+            arguments.Add(processName);
+        }
+        return arguments;
+    }
 
     private string GetWaitingStatus(int processId)
     {
@@ -323,16 +334,29 @@ public sealed class PresentMonService : IDisposable
         {
             // PresentMon follows its root cause with several help/readme lines.
             // Preserve permission classification regardless of later diagnostics.
-            _etwAccessDenied |= line.Contains("access denied", StringComparison.OrdinalIgnoreCase)
-                || line.Contains("access is denied", StringComparison.OrdinalIgnoreCase)
-                || line.Contains("privilege", StringComparison.OrdinalIgnoreCase)
-                || line.Contains("0x80070005", StringComparison.OrdinalIgnoreCase)
-                || line.Contains("ERROR_ACCESS_DENIED", StringComparison.OrdinalIgnoreCase);
+            _etwAccessDenied |= IsAccessDeniedDiagnostic(line);
             var message = line.Trim();
             if (message.Length > 512) message = message[..512];
             _lastError = string.IsNullOrEmpty(_lastError) ? message : $"{_lastError}\n{message}";
             if (_lastError.Length > 1536) _lastError = _lastError[^1536..];
         }
+    }
+
+    private static bool IsAccessDeniedDiagnostic(string line)
+    {
+        // PresentMon normally warns that a non-elevated process cannot identify
+        // short-lived processes or processes on other accounts. That warning is
+        // not a failure to start our ETW trace session.
+        if (line.TrimStart().StartsWith("warning", StringComparison.OrdinalIgnoreCase)) return false;
+        return line.Contains("access denied", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("access is denied", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("0x80070005", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("ERROR_ACCESS_DENIED", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("ERROR_PRIVILEGE_NOT_HELD", StringComparison.OrdinalIgnoreCase)
+            || (line.Contains("privilege", StringComparison.OrdinalIgnoreCase)
+                && (line.Contains("error", StringComparison.OrdinalIgnoreCase)
+                    || line.Contains("not held", StringComparison.OrdinalIgnoreCase)
+                    || line.Contains("insufficient", StringComparison.OrdinalIgnoreCase)));
     }
 
     private void UpdateForegroundTarget()
@@ -342,7 +366,9 @@ public sealed class PresentMonService : IDisposable
         GetWindowThreadProcessId(window, out var processId);
         if (processId == 0 || processId == Environment.ProcessId) return;
         var name = TryGetProcessName((int)processId);
-        if (name is null || IgnoredProcesses.Contains(name)) return;
+        if (name is null || FpsForegroundTargetPolicy.IsIgnoredProcess(name)) return;
+        var selected = FpsForegroundTargetPolicy.Select(_automaticProcessId, (int)processId, name, Environment.ProcessId);
+        if (selected != (int)processId) return;
         _automaticProcessId = (int)processId;
         _targetName = name;
     }

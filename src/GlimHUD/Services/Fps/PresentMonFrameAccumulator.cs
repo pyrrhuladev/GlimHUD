@@ -55,6 +55,20 @@ internal sealed class PresentMonFrameAccumulator
         return duration > 0 ? 1000 * stream.Samples.Count / duration : null;
     }
 
+    public PresentMonFrameDiagnostics GetDiagnostics(int processId, long now)
+    {
+        var streams = _streams.Where(pair => pair.Key.ProcessId == processId).ToArray();
+        var selected = streams
+            .Where(pair => ElapsedSeconds(pair.Value.LastReceivedTimestamp, now) <= 2.5 && pair.Value.Samples.Count >= 2)
+            .OrderByDescending(pair => pair.Value.Samples.Count)
+            .FirstOrDefault();
+        if (selected.Value is not null)
+            return new(selected.Key.SwapChain, streams.Length,
+                Math.Max(0, ElapsedSeconds(selected.Value.LastReceivedTimestamp, now) * 1000));
+        var newest = streams.Length == 0 ? (long?)null : streams.Max(pair => pair.Value.LastReceivedTimestamp);
+        return new(null, streams.Length, newest.HasValue ? Math.Max(0, ElapsedSeconds(newest.Value, now) * 1000) : null);
+    }
+
     public void Clear() => _streams.Clear();
 
     private static double ElapsedSeconds(long from, long to) => (double)(to - from) / Stopwatch.Frequency;
@@ -66,3 +80,5 @@ internal sealed class PresentMonFrameAccumulator
         public long LastReceivedTimestamp { get; set; }
     }
 }
+
+internal readonly record struct PresentMonFrameDiagnostics(string? SwapChain, int StreamCount, double? AgeMilliseconds);

@@ -32,6 +32,9 @@ foreach ($requiredFile in @('GlimHUD.exe','GlimHUD.dll','GlimHUD.runtimeconfig.j
         throw "A complete self-contained win-x64 publish is required; missing $requiredFile in $inputPath. Run scripts/Publish.ps1 -SelfContained first."
     }
 }
+$pawnIoVerifier = Join-Path $PSScriptRoot 'Get-PawnIO.ps1'
+if (-not (Test-Path -LiteralPath $pawnIoVerifier -PathType Leaf)) { throw 'PawnIO bundle verification script is missing.' }
+& $pawnIoVerifier -DestinationDirectory (Join-Path $inputPath 'tools\PawnIO') -VerifyOnly
 foreach ($forbiddenDirectory in @('src','.git','.tools','.packages','obj')) {
     if (Test-Path -LiteralPath (Join-Path $inputPath $forbiddenDirectory)) { throw "Publish input contains source/build directory: $forbiddenDirectory" }
 }

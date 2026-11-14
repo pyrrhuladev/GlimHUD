@@ -140,6 +140,8 @@ public partial class App : System.Windows.Application
         overlay.VolumeSlider.Value = 60;
         overlay.VolumeValue.Text = "60%";
         if (networkPreview) overlay.SetNetworkPreview(CreateNetworkPreview(variant == "network-idle"));
+        if (variant is "cpu-driver-missing" or "cpu-access-denied")
+            overlay.SetTelemetryPreview(CreateCpuTemperaturePreview(variant == "cpu-access-denied"));
         if (variant == "slim-stress")
         {
             overlay.TrackTitle.Text = "A very long track title that must remain inside its column";
@@ -208,6 +210,12 @@ public partial class App : System.Windows.Application
             settings.NetworkCard.BringIntoView();
             settingsContent.UpdateLayout();
         }
+        else if (variant is "cpu-driver-missing" or "cpu-access-denied")
+        {
+            RenderElement(settingsContent, new Size(640, 790));
+            settings.HardwareCard.BringIntoView();
+            settingsContent.UpdateLayout();
+        }
         else if (variant == "updates")
         {
             RenderElement(settingsContent, new Size(640, 790));
@@ -248,6 +256,14 @@ public partial class App : System.Windows.Application
             adapter.LinkSpeedBitsPerSecond, idle ? 0 : 12_400_000, idle ? 0 : 850_000,
             2_450_000_000, 180_000_000, [adapter], history, now);
     }
+
+    private static Services.TelemetrySnapshot CreateCpuTemperaturePreview(bool accessDenied = false)
+        => new(32, null, 78, 68, 8_600_000_000, 16_000_000_000, 54,
+            "Intel Core i5-10400F", "NVIDIA GeForce (preview)", L10n.Text("CPU temperature unavailable", "Температура CPU недоступна"))
+        {
+            CpuTemperatureState = accessDenied ? Services.CpuTemperatureState.AccessDenied : Services.CpuTemperatureState.DriverMissing,
+            CpuTemperatureAccess = new(accessDenied, accessDenied ? "2.2.0" : null, false, accessDenied ? 5 : 2)
+        };
 
     private static RenderTargetBitmap RenderElement(FrameworkElement element, Size? fixedSize = null)
     {
@@ -314,6 +330,7 @@ public partial class App : System.Windows.Application
             var contextMenuPresentation = await CheckContextMenuPresentationAsync(overlay, settings);
             var networkPresentation = CheckNetworkPresentation();
             var compactPresentation = CheckCompactPresentation();
+            var cpuTemperaturePresentation = CheckCpuTemperaturePresentation();
             settings.Close();
             overlay.Settings.Locked = true;
             overlay.ApplySettings();
@@ -347,6 +364,7 @@ public partial class App : System.Windows.Application
                 ContextMenuPresentation = contextMenuPresentation,
                 NetworkPresentation = networkPresentation,
                 CompactPresentation = compactPresentation,
+                CpuTemperaturePresentation = cpuTemperaturePresentation,
                 Network = new
                 {
                     Status = overlay.NetworkSnapshot?.Status.ToString(),
@@ -369,6 +387,59 @@ public partial class App : System.Windows.Application
             await overlay.StopAsync();
             overlay.Close();
         }
+    }
+
+    private static bool CheckCpuTemperaturePresentation()
+    {
+        var preview = new OverlayWindow(initializeServices: false);
+        SettingsWindow? details = null;
+        try
+        {
+            preview.SetTelemetryPreview(CreateCpuTemperaturePreview());
+            preview.SetFpsPreview(new(120, 42, "example-game", @"Failure at C:\Users\private-name\Game\capture.exe", true, true, false)
+            {
+                ParsedFrameCount = 120, SelectedSwapChain = "0x1234", ObservedSwapChainCount = 1,
+                FrameDataAgeMilliseconds = 30, LastCaptureDiagnostic = @"Error at C:\Users\private-name\trace.etl"
+            });
+            details = new SettingsWindow(preview);
+            RenderElement((FrameworkElement)details.Content, new Size(640, 790));
+            if (details.PawnIoButton.Visibility != Visibility.Visible
+                || details.PawnIoWebsiteButton.Visibility != Visibility.Visible
+                || details.CpuTemperatureValue.Text != "-"
+                || details.CpuTemperatureRestartButton.Visibility != Visibility.Collapsed)
+                throw new InvalidOperationException("Missing CPU driver did not expose the bundled installer and accurate temperature status.");
+            using (var report = JsonDocument.Parse(preview.GetDiagnosticReport()))
+            {
+                var cpu = report.RootElement.GetProperty("Cpu");
+                if (cpu.GetProperty("TemperatureState").GetString() != "DriverMissing"
+                    || cpu.GetProperty("TemperatureCelsius").ValueKind != JsonValueKind.Null
+                    || cpu.GetProperty("Driver").GetProperty("DeviceOpenError").GetInt32() != 2
+                    || report.RootElement.EnumerateObject().Any(property => property.Name is "Media" or "Audio" or "Network"))
+                    throw new InvalidOperationException("CPU support diagnostics lost the actual missing-driver state.");
+                if (preview.GetDiagnosticReport().Contains("private-name", StringComparison.Ordinal)
+                    || report.RootElement.GetProperty("Fps").GetProperty("ParsedFrameCount").GetInt64() != 120)
+                    throw new InvalidOperationException("Support diagnostics leaked free-form paths or dropped typed frame data.");
+            }
+            preview.SetTelemetryPreview(CreateCpuTemperaturePreview(accessDenied: true));
+            var shouldOfferElevation = Services.AppRestartService.CanRequestElevation;
+            if ((details.CpuTemperatureRestartButton.Visibility == Visibility.Visible) != shouldOfferElevation)
+                throw new InvalidOperationException("The CPU permission recovery action does not match the current ability to elevate.");
+            var sensor = new Services.CpuTemperatureSensorInfo("/intelcpu/0", "Intel Core i5-10400F",
+                "/intelcpu/0/temperature/6", "CPU Package", 59, true, true);
+            preview.SetTelemetryPreview(CreateCpuTemperaturePreview() with
+            {
+                CpuTemperatureCelsius = 59,
+                CpuTemperatureState = Services.CpuTemperatureState.Ready,
+                CpuTemperatureSource = sensor.Identifier,
+                CpuTemperatureSensors = [sensor]
+            });
+            if (details.PawnIoButton.Visibility != Visibility.Collapsed
+                || !details.CpuTemperatureDetails.Text.Contains("CPU Package", StringComparison.Ordinal)
+                || details.CpuTemperatureDetails.Text.Contains(sensor.Identifier, StringComparison.Ordinal))
+                throw new InvalidOperationException("A measured CPU package temperature did not replace driver recovery with its readable source.");
+            return true;
+        }
+        finally { details?.Close(); preview.Close(); }
     }
 
     private static bool CheckCompactPresentation()

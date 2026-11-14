@@ -1,0 +1,72 @@
+PawnIO Modules embedded in LibreHardwareMonitorLib 0.9.6
+=====================================================
+
+Component: PawnIO.Modules, official release 0.2.2
+License: GNU Lesser General Public License, version 2.1 or later
+SPDX: LGPL-2.1-or-later
+
+GlimHUD redistributes the unmodified LibreHardwareMonitorLib 0.9.6 assembly.
+That assembly embeds the twelve signed PawnIO module bytecode files listed
+below. These module resources are separate from LibreHardwareMonitor's
+MPL-2.0 core code and from the separate PawnIO kernel driver/installer.
+
+Full license text is retained in PawnIO.Modules.LGPL-2.1.txt in this directory.
+The original LibreHardwareMonitor resource README is retained verbatim as
+PawnIO.Modules.Upstream-README.txt.
+
+Source and provenance
+---------------------
+Module source at the verified release tag, including build files:
+https://github.com/namazso/PawnIO.Modules/tree/0.2.2
+https://github.com/namazso/PawnIO.Modules/archive/refs/tags/0.2.2.zip
+
+Official signed module release:
+https://github.com/namazso/PawnIO.Modules/releases/tag/0.2.2
+https://github.com/namazso/PawnIO.Modules/releases/download/0.2.2/release_0_2_2.zip
+Official release archive SHA256:
+b9e05e52c07fd76b7f9db3da0f542b710d55511dc995d4f4ca08e9179b4c4032
+
+LibreHardwareMonitorLib 0.9.6 NuGet repository commit:
+3d331e3370efb858411f19511373eff65a218701
+Pinned resource directory, including its original COPYING and README:
+https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/tree/3d331e3370efb858411f19511373eff65a218701/LibreHardwareMonitorLib/Resources/PawnIo
+
+All twelve bytecode files in that pinned LibreHardwareMonitor resource
+directory were compared byte-for-byte with the official 0.2.2 module archive.
+Their hashes also match the module resources embedded in the distributed
+LibreHardwareMonitorLib 0.9.6 assembly. The retained upstream resource README
+still names 0.1.6; the 0.2.2 attribution here follows the verified byte match.
+
+Copyright notices from the corresponding 0.2.2 module sources
+------------------------------------------------------------
+AMDFamily0F.p, AMDFamily10.p, AMDFamily17.p, IntelMSR.p, IsaBridgeEC.p,
+RyzenSMU.p:
+Copyright (C) 2025  namazso <admin@namazso.eu>
+
+LpcACPIEC.p, LpcIO.p:
+Copyright (C) 2023  namazso <admin@namazso.eu>
+
+LpcCrOSEC.p, SmbusI801.p, SmbusPIIX4.p:
+Copyright (C) 2025  Steve-Tech <me@stevetech.au>
+
+SmbusNCT6793.p:
+Copyright (C) 2025  Adam Honse <calcprogrammer1@gmail.com>
+
+Each listed module's source license header permits redistribution and/or
+modification under GNU LGPL version 2.1 or, at your option, any later version.
+The sources retain their additional upstream implementation references.
+
+Unmodified bytecode SHA256
+-------------------------
+AMDFamily0F.bin   1788550c02100ad6bbc91604399ed6e055058ea0f6c0c828c02d9b01a09ad27f
+AMDFamily10.bin   79be1396621aa44eb149c5dc6d1bab4519b9cfa49a32af5e022cb9f9ca887658
+AMDFamily17.bin   099dc01d6db97ea997fec4a461e191cc64b9d7ce47c9d2153c451c56c2adcf50
+IntelMSR.bin      ed41a0d0de082f4668a9caccb9681ebbad97a8ed3452c41918dda1eb454b77a9
+IsaBridgeEC.bin   7218c633384bd019cce09e8df91f74996f980765ac44dde0f22b0b5318c20f03
+LpcACPIEC.bin     c38fd116e7aff4d1fdb0a494e296be0a6708e5a22fc72f14587442fb7f8f7906
+LpcCrOSEC.bin     277ed6ce6b5f647d5dae9b06c83ed39e904974b06f95598d49f4737237974776
+LpcIO.bin         3dcf8b2bc80ff642d97c4608511a818642b5bf315ff53df3df393d043e71d101
+RyzenSMU.bin      0cf0fe1296c5c38f4bee0f96352b35f14d32ab97cb58fd17600646d98507d8aa
+SmbusI801.bin     76b082a144027244fe7bbf3ca0e987e7dfa279aa87e0ccc2a6a918e10e2038e1
+SmbusNCT6793.bin  385bd1b229faa44aefe2eb1f938ac629f6d897f1a4931dab5341b18b3bd432c1
+SmbusPIIX4.bin    3f8b44c93eb030d59fb68c6fdc6857c61313eab2b6aa0ed64595396d71bf3ea3

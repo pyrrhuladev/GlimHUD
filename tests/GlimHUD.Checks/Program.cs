@@ -17,6 +17,12 @@ public static class Program
         {
             var fixtureMode = Environment.GetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE");
             if (fixtureMode == "success") return 0;
+            if (fixtureMode == "success-warning")
+            {
+                Console.Error.WriteLine("warning: PresentMon requires elevated privilege in order to query processes that are");
+                Console.Error.WriteLine("         short-running or started on another account.");
+                return 0;
+            }
             if (fixtureMode == "exit5") return 5;
             if (fixtureMode is "vulkan" or "unsupported-schema")
             {
@@ -49,10 +55,11 @@ public static class Program
             CheckCsv();
             CheckFrameWindows();
             CheckCaptureArguments();
+            CheckRecorderForegroundTransitions();
             CheckVulkanCaptureFixture();
             CheckUnavailableTool();
             CheckMultilinePermissionError();
-            Console.WriteLine("PASS: DXGI/Vulkan CSV, kernel capture flags, source-time FPS, PID/swap-chain isolation, schema diagnostics, staleness, ETW recovery and retry.");
+            Console.WriteLine("PASS: DXGI/Vulkan CSV, recorder foreground isolation, kernel capture flags, source-time FPS, PID/swap-chain diagnostics, staleness, ETW recovery and retry.");
             return 0;
         }
         catch (Exception exception)
@@ -98,6 +105,51 @@ public static class Program
         Check(arguments.Contains("--v1_metrics") && arguments.Contains("--output_stdout"),
             "Capture output must retain the supported CSV protocol.");
         Check(!arguments.Contains("--restart_as_admin"), "The collector must not launch an unrequested permission dialog.");
+        Check(!arguments.Contains("--stop_existing_session") && !arguments.Contains("--terminate_existing_session"),
+            "Starting FPS capture must never stop or replace another recorder's ETW session.");
+        Check(arguments[arguments.ToList().IndexOf("--session_name") + 1] == "GlimHUD-fixture",
+            "Capture must retain our unique supplied ETW session name.");
+        Check(arguments.Contains("NVIDIA Overlay.exe") && arguments.Contains("NVIDIA Share.exe"),
+            "Known NVIDIA helper swap chains must not consume our console frame stream.");
+    }
+
+    private static void CheckRecorderForegroundTransitions()
+    {
+        const int ownPid = 999;
+        var selected = FpsForegroundTargetPolicy.Select(null, 42, "enshrouded", ownPid);
+        Check(selected == 42, "An actual game must become the automatic FPS source.");
+        foreach (var helper in new[] { "NVIDIA Overlay", "NVIDIA Share", "nvidia overlay.exe", "nvcontainer",
+                     "nvsphelper64", "FrameView", "GameBar", "GameBarFTServer", "GameOverlayUI", "obs64" })
+        {
+            selected = FpsForegroundTargetPolicy.Select(selected, 71, helper, ownPid);
+            Check(selected == 42, $"Recorder/helper {helper} stole the game's FPS source.");
+            Check(FpsForegroundTargetPolicy.Select(null, 71, helper, ownPid) is null,
+                $"Recorder/helper {helper} must not become an initial automatic FPS source.");
+        }
+        Check(FpsForegroundTargetPolicy.Select(selected, ownPid, "GlimHUD", ownPid) == 42,
+            "Opening the HUD's own controls must retain its game source.");
+        Check(FpsForegroundTargetPolicy.Select(selected, 0, null, ownPid) == 42,
+            "A transient missing foreground window must retain the existing source.");
+        Check(FpsForegroundTargetPolicy.Select(selected, 73, "NVIDIA Game", ownPid) == 73,
+            "Overlay exclusion must not use broad substring matching against unrelated games.");
+        Check(FpsForegroundTargetPolicy.Select(selected, 74, "firefox", ownPid) == 74,
+            "Ordinary foreground changes must retain existing automatic-source behavior.");
+
+        var accumulator = new PresentMonFrameAccumulator();
+        var now = Stopwatch.GetTimestamp();
+        AddFrames(accumulator, 42, "game-scene", 120, 1000d / 120, now);
+        AddFrames(accumulator, 71, "recorder-controls", 20, 50, now);
+        selected = FpsForegroundTargetPolicy.Select(42, 71, "NVIDIA Overlay", ownPid);
+        Near(accumulator.GetFramesPerSecond(selected!.Value, now), 120,
+            "The recorder's independent 20 FPS swap chain replaced the game rate.");
+        var state = accumulator.GetDiagnostics(42, now);
+        Check(state.SwapChain == "game-scene" && state.StreamCount == 1 && state.AgeMilliseconds == 0,
+            "Frame diagnostics must describe only the selected game's stream.");
+        var stale = accumulator.GetDiagnostics(42, now + Stopwatch.Frequency * 3);
+        Check(stale.SwapChain is null && stale.AgeMilliseconds is >= 3000,
+            "A stalled game stream must remain diagnosable after its FPS expires.");
+        Check(accumulator.GetFramesPerSecond(42, now + Stopwatch.Frequency * 3) is null,
+            "Recorder fixes must not keep inventing FPS when real game frames stop arriving.");
     }
 
     private static void CheckVulkanCaptureFixture()
@@ -245,6 +297,19 @@ public static class Program
                 && deadline.Elapsed < TimeSpan.FromSeconds(8));
             Check(!snapshot.RequiresElevation && !snapshot.IsRunning && snapshot.Status == "Frame capture stopped",
                 "Retry must clear the previous permission error after a successful capture attempt.");
+
+            Environment.SetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE", "success-warning");
+            deadline.Restart();
+            do
+            {
+                service.Start();
+                Thread.Sleep(25);
+                snapshot = service.GetSnapshot();
+            } while ((snapshot.IsRunning || snapshot.LastCaptureDiagnostic is null) && deadline.Elapsed < TimeSpan.FromSeconds(8));
+            Check(!snapshot.RequiresElevation && !snapshot.IsRunning && snapshot.Status == "Frame capture stopped",
+                "A process-query privilege warning must not be mistaken for an ETW capture failure.");
+            Check(snapshot.LastCaptureDiagnostic?.Contains("short-running", StringComparison.Ordinal) == true,
+                "Nonfatal collector warnings must remain available in diagnostics.");
 
             Environment.SetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE", "exit5");
             deadline.Restart();

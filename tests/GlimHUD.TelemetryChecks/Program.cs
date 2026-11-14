@@ -1,16 +1,39 @@
 using GlimHUD.Services;
 using GlimHUD.Localization;
 using LibreHardwareMonitor.Hardware;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GlimHUD.TelemetryChecks;
 
 public static class Program
 {
-    public static async Task<int> Main()
+    public static async Task<int> Main(string[] args)
     {
         try
         {
+            if (args is ["--driver-installer-checks"])
+            {
+                await PawnIoInstallerChecks.RunAsync();
+                return 0;
+            }
+            if (args is ["--diagnostics", var output])
+            {
+                using var diagnosticService = new TelemetryService();
+                await Sample(diagnosticService);
+                await Task.Delay(500);
+                var sample = await Sample(diagnosticService);
+                var path = Path.GetFullPath(output);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                options.Converters.Add(new JsonStringEnumConverter());
+                await File.WriteAllTextAsync(path, JsonSerializer.Serialize(sample, options));
+                Console.WriteLine(path);
+                return 0;
+            }
             CheckGpuMetricSelection();
+            await PawnIoInstallerChecks.RunAsync();
+            CheckCpuTemperatureSelection();
             CheckLocalizedCpuSource();
             await CheckWindowsOnlyFallback();
             await CheckHardwareSampling();
@@ -23,6 +46,42 @@ public static class Program
             Console.Error.WriteLine($"FAIL: {exception}");
             return 1;
         }
+    }
+
+    private static void CheckCpuTemperatureSelection()
+    {
+        static CpuTemperatureSensorInfo Sensor(string name, double? value, string? id = null)
+            => new("/intelcpu/0", "Intel Core i5-10400F", id ?? name, name,
+                value, CpuTemperatureSupport.IsAbsoluteName(name));
+        Check(CpuTemperatureSupport.Select([Sensor("CPU Package", 57), Sensor("CPU Core #1", 61)])?.Name == "CPU Package",
+            "Intel package temperature must take precedence over an individual hotter core.");
+        Check(CpuTemperatureSupport.Select([Sensor("CPU Package", null), Sensor("Core Max", 63), Sensor("Core Average", 52)])?.Value == 63,
+            "Missing package readings must fall back to actual core maximum.");
+        Check(CpuTemperatureSupport.Select([Sensor("P-Core #1", 62), Sensor("E-Core #2", 48)])?.Value == 62,
+            "Hybrid Intel core names remain valid when package/summary readings are unavailable.");
+        Check(CpuTemperatureSupport.Select([Sensor("CPU Package", null), Sensor("CPU Core #1", null),
+            Sensor("CPU Core #2", null), Sensor("Core Max", 63), Sensor("Core Average", 52)]) is null,
+            "LHM's retained Core Max/Average must not masquerade as a fresh reading when every core read failed.");
+        Check(CpuTemperatureSupport.Select([Sensor("CPU Core #1 Distance to TjMax", 40), Sensor("CPU Package TjMax", 100)]) is null,
+            "A relative thermal limit must never be displayed as the CPU's Celsius temperature.");
+        Check(CpuTemperatureSupport.Select([Sensor("Core (Tctl/Tdie)", 64), Sensor("CCD1 (Tdie)", 56)])?.Value == 64,
+            "AMD package sensors retain their priority.");
+        Check(CpuTemperatureSupport.ValidTemperature(float.NaN) is null
+            && CpuTemperatureSupport.ValidTemperature(float.PositiveInfinity) is null
+            && CpuTemperatureSupport.ValidTemperature(250) is null,
+            "Invalid/unphysical values remain unavailable.");
+        Check(CpuTemperatureSupport.GetState(false, false, null) == CpuTemperatureState.Disabled,
+            "Disabled hardware probing must remain a distinct state.");
+        Check(CpuTemperatureSupport.GetState(true, true, new(false, null, false, 2)) == CpuTemperatureState.Ready,
+            "A valid sensor reading is authoritative even if a driver probe cannot be completed.");
+        Check(CpuTemperatureSupport.GetState(true, false, new(false, null, false, 2)) == CpuTemperatureState.DriverMissing,
+            "An unregistered and absent driver is diagnosed specifically.");
+        Check(CpuTemperatureSupport.GetState(true, false, new(true, "2.2.0", false, 5)) == CpuTemperatureState.AccessDenied,
+            "An installed driver with access denied must not be misreported as a missing sensor.");
+        Check(CpuTemperatureSupport.GetState(true, false, new(true, "2.2.0", false, 2)) == CpuTemperatureState.DriverUnavailable,
+            "An installed package does not prove a usable running driver.");
+        Check(CpuTemperatureSupport.GetState(true, false, new(true, "2.2.0", true, null)) == CpuTemperatureState.SensorUnavailable,
+            "Accessible PawnIO without a CPU reading remains an honest unavailable value.");
     }
 
     private static void CheckLocalizedCpuSource()
@@ -55,6 +114,9 @@ public static class Program
               sample.GpuTemperatureCelsius is null && sample.AvailableGpus.Count == 0,
             "Windows-only fallback must not invent hardware measurements.");
         Check(!string.IsNullOrWhiteSpace(sample.Status), "Missing hardware must have a status.");
+        Check(sample.CpuTemperatureState == CpuTemperatureState.Disabled
+            && sample.CpuTemperatureAccess is null && sample.CpuTemperatureSensors.Count == 0,
+            "Windows-only mode must not open/query the hardware driver.");
         Console.WriteLine($"Native fallback: CPU {sample.CpuLoadPercent:F1}%; RAM {sample.MemoryUsedBytes / 1073741824.0:F2}/{sample.MemoryTotalBytes / 1073741824.0:F2} GiB.");
     }
 
@@ -71,6 +133,15 @@ public static class Program
         CheckPercent(sample.GpuLoadPercent, "GPU load");
         CheckTemperature(sample.GpuTemperatureCelsius, "GPU temperature");
         Check(sample.CpuLoadPercent is not null, "CPU load must survive unavailable temperature sensors.");
+        Check(sample.CpuTemperatureAccess is not null, "Hardware mode must expose the read-only PawnIO access diagnosis.");
+        Check(sample.CpuTemperatureCelsius.HasValue == (sample.CpuTemperatureState == CpuTemperatureState.Ready),
+            "CPU-temperature state and measured value must agree.");
+        Check(sample.CpuTemperatureSensors.Count(item => item.IsSelected) <= 1,
+            "Only one authoritative temperature sensor may be selected for the main CPU reading.");
+        if (sample.CpuTemperatureCelsius.HasValue)
+            Check(sample.CpuTemperatureSensors.Any(item => item.IsSelected && item.IsAbsoluteTemperature
+                && item.Identifier == sample.CpuTemperatureSource && item.Value == sample.CpuTemperatureCelsius),
+                "The published CPU temperature must retain its exact real-sensor origin.");
         foreach (var gpu in sample.AvailableGpus)
         {
             Check(!string.IsNullOrWhiteSpace(gpu.Identifier) && !string.IsNullOrWhiteSpace(gpu.Name),

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -41,6 +42,8 @@ public partial class OverlayWindow : Window
     private CancellationTokenSource? _automaticUpdateCheck;
     private Task? _updateCheckTask;
     private bool _installingUpdate;
+    private readonly PawnIoInstallerService _cpuDriverInstaller = new();
+    private PawnIoInstallResult? _lastCpuDriverInstallResult;
     private long _glowTimestamp;
     private double _glowSignalPeak;
     private int _languageRevision;
@@ -524,6 +527,58 @@ public partial class OverlayWindow : Window
         catch (Exception error) { App.LogError(error); }
     }
 
+    public async Task<PawnIoInstallResult> InstallCpuDriverAsync()
+    {
+        if (!_initializeServices || _closing)
+            return new(PawnIoInstallStatus.Unavailable, ErrorCode: "NotRunning");
+        var result = await _cpuDriverInstaller.InstallAsync(_shutdown.Token);
+        _lastCpuDriverInstallResult = result;
+        if (!_closing && result.Status == PawnIoInstallStatus.Installed)
+            await RefreshSnapshotsAsync();
+        return result;
+    }
+
+    /// <summary>On-demand support data; no window titles, media or network identifiers.</summary>
+    public string GetDiagnosticReport()
+    {
+        static string? Limit(string? value) => value is null ? null : value[..Math.Min(value.Length, 1024)];
+        var hardware = TelemetrySnapshot;
+        var fps = FpsSnapshot;
+        return JsonSerializer.Serialize(new
+        {
+            Application = "GlimHUD",
+            Version = typeof(App).Assembly.GetName().Version?.ToString(3),
+            Windows = Environment.OSVersion.VersionString,
+            Architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+            Administrator = AppRestartService.IsAdministrator,
+            DriverInstallation = _lastCpuDriverInstallResult is { } installation ? new
+            {
+                Status = installation.Status.ToString(), installation.Win32Code, installation.ErrorCode
+            } : null,
+            Cpu = hardware is null ? null : new
+            {
+                Name = Limit(hardware.CpuName),
+                TemperatureCelsius = hardware.CpuTemperatureCelsius,
+                TemperatureState = hardware.CpuTemperatureState.ToString(),
+                TemperatureSource = Limit(hardware.CpuTemperatureSource),
+                Driver = hardware.CpuTemperatureAccess,
+                Sensors = hardware.CpuTemperatureSensors.Take(64).Select(sensor => new
+                {
+                    Name = Limit(sensor.Name), Identifier = Limit(sensor.Identifier), sensor.Value,
+                    sensor.IsAbsoluteTemperature, sensor.IsSelected
+                }).ToArray()
+            },
+            Fps = fps is null ? null : new
+            {
+                fps.ProcessId, ProcessName = Limit(fps.ProcessName), fps.IsPinned,
+                fps.FramesPerSecond, fps.IsAvailable, fps.IsRunning, fps.RequiresElevation,
+                fps.ObservedProcessCount, fps.ParsedFrameCount,
+                fps.RejectedFrameRowCount, SelectedSwapChain = Limit(fps.SelectedSwapChain),
+                fps.ObservedSwapChainCount, fps.FrameDataAgeMilliseconds
+            }
+        }, new JsonSerializerOptions { WriteIndented = true });
+    }
+
     public IReadOnlyList<FpsProcessTarget> GetFpsTargets() => _fps.GetAvailableTargets();
     public void SetFpsTarget(int? processId)
     {
@@ -597,6 +652,21 @@ public partial class OverlayWindow : Window
         if (_initializeServices) throw new InvalidOperationException("Preview data cannot replace live network measurements.");
         NetworkSnapshot = snapshot;
         RenderNetwork();
+        SnapshotsUpdated?.Invoke(this, EventArgs.Empty);
+    }
+
+    internal void SetTelemetryPreview(TelemetrySnapshot snapshot)
+    {
+        if (_initializeServices) throw new InvalidOperationException("Preview data cannot replace live hardware measurements.");
+        TelemetrySnapshot = snapshot;
+        RenderTelemetry();
+        SnapshotsUpdated?.Invoke(this, EventArgs.Empty);
+    }
+
+    internal void SetFpsPreview(FpsSnapshot snapshot)
+    {
+        if (_initializeServices) throw new InvalidOperationException("Preview data cannot replace live frame measurements.");
+        FpsSnapshot = snapshot;
         SnapshotsUpdated?.Invoke(this, EventArgs.Empty);
     }
 

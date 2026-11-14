@@ -285,12 +285,27 @@
                             <TextBlock Text="{DynamicResource Loc.ManualGamesHint}" Style="{StaticResource Muted}" Margin="0,12,0,0"/>
                         </StackPanel>
                     </Border>
-                    <Border Style="{StaticResource Card}">
+                    <Border x:Name="HardwareCard" Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="{DynamicResource Loc.SystemMetrics}" Style="{StaticResource SectionTitle}"/>
                             <TextBlock Text="{DynamicResource Loc.GraphicsCard}"/>
                             <ComboBox x:Name="GpuCombo" SelectionChanged="Gpu_Changed" AutomationProperties.Name="{DynamicResource Loc.GraphicsCard}"/>
                             <TextBlock x:Name="HardwareStatus" Style="{StaticResource Muted}" Margin="0,7,0,15"/>
+                            <Border x:Name="CpuTemperatureCard" Background="#0B0E13" BorderBrush="#242933" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,0,0,17">
+                                <StackPanel>
+                                    <DockPanel><TextBlock Text="{DynamicResource Loc.CpuTemperature}" FontWeight="SemiBold"/><TextBlock x:Name="CpuTemperatureValue" DockPanel.Dock="Right" HorizontalAlignment="Right" FontWeight="SemiBold" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                    <TextBlock x:Name="CpuTemperatureStateText" Style="{StaticResource Muted}" Margin="0,7,0,0"/>
+                                    <TextBlock x:Name="CpuTemperatureHelp" Style="{StaticResource Muted}" Margin="0,6,0,0" Visibility="Collapsed"/>
+                                    <TextBlock x:Name="CpuTemperatureDetails" Style="{StaticResource Muted}" FontSize="11" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Margin="0,7,0,0" Visibility="Collapsed"/>
+                                    <WrapPanel x:Name="CpuTemperatureActions" Margin="0,10,0,0" Visibility="Collapsed">
+                                        <Button x:Name="CpuTemperatureRestartButton" Content="{DynamicResource Loc.RestartAdmin}" Style="{StaticResource ActionButton}" Click="RestartAdmin_Click" ToolTip="{DynamicResource Loc.CpuTemperatureElevationHint}" Margin="0,0,8,8" Visibility="Collapsed"/>
+                                        <Button x:Name="PawnIoButton" Content="{DynamicResource Loc.PawnIoInstall}" Style="{StaticResource ActionButton}" Click="InstallCpuDriver_Click" ToolTip="{DynamicResource Loc.PawnIoInstallHint}" Margin="0,0,8,8" Visibility="Collapsed"/>
+                                        <Button x:Name="PawnIoWebsiteButton" Content="{DynamicResource Loc.PawnIoWebsite}" Style="{StaticResource ActionButton}" Click="OpenPawnIo_Click" ToolTip="{DynamicResource Loc.PawnIoWebsiteHint}" Margin="0,0,0,8" Visibility="Collapsed"/>
+                                    </WrapPanel>
+                                    <TextBlock x:Name="PawnIoInstallStatusText" Style="{StaticResource Muted}" FontSize="11" Margin="0,7,0,0" Visibility="Collapsed"/>
+                                    <TextBlock x:Name="PawnIoLinkStatus" Foreground="#F6A29F" FontSize="11" Margin="0,7,0,0" Visibility="Collapsed"/>
+                                </StackPanel>
+                            </Border>
                             <TextBlock Text="{DynamicResource Loc.FpsSource}"/>
                             <ComboBox x:Name="FpsCombo" SelectionChanged="Fps_Changed" DropDownOpened="Fps_DropDownOpened" AutomationProperties.Name="{DynamicResource Loc.FpsSource}"/>
                             <TextBlock x:Name="FpsStatus" Style="{StaticResource Muted}" Margin="0,7,0,0"/>
@@ -300,6 +315,8 @@
                             </WrapPanel>
                             <TextBlock x:Name="FpsAccessHint" Text="{DynamicResource Loc.FpsAccessHint}" Style="{StaticResource Muted}" Margin="0,8,0,0" Visibility="Collapsed"/>
                             <TextBlock Text="{DynamicResource Loc.TelemetryHint}" Style="{StaticResource Muted}" Margin="0,13,0,0"/>
+                            <Button x:Name="CopyDiagnosticsButton" Content="{DynamicResource Loc.CopyDiagnostics}" Style="{StaticResource ActionButton}" Click="CopyDiagnostics_Click" ToolTip="{DynamicResource Loc.CopyDiagnosticsHint}" HorizontalAlignment="Left" Margin="0,13,0,0"/>
+                            <TextBlock x:Name="CopyDiagnosticsStatus" Style="{StaticResource Muted}" FontSize="11" Margin="0,7,0,0" Visibility="Collapsed"/>
                         </StackPanel>
                     </Border>
                     <Border x:Name="NetworkCard" Style="{StaticResource Card}">

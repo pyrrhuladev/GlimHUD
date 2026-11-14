@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -17,7 +18,10 @@ REQUIRED_NOTICES = (
     "Notices/BlackSharp.Core.txt", "Notices/DiskInfoToolkit.txt", "Notices/RAMSPDToolkit-NDD.txt",
     "Notices/Mono.Posix.NETStandard.txt", "Notices/Microsoft.NET.txt", "Notices/Microsoft.NET-ThirdParty.txt",
     "Notices/NetSparkle.txt", "Notices/NetSparkle.Chaos.NaCl.txt",
+    "Notices/PawnIO.Modules.txt", "Notices/PawnIO.Modules.LGPL-2.1.txt", "Notices/PawnIO.Modules.Upstream-README.txt",
+    "Notices/PawnIO.Setup.txt",
 )
+PAWNIO_SETUP_SHA256 = "1f519a22e47187f70a1379a48ca604981c4fcf694f4e65b734aaa74a9fba3032"
 EXCLUDED_DIRECTORIES = {
     "bin", "obj", ".git", ".codex", ".tools", ".packages", "__pycache__", ".vs",
     "artifacts", "node_modules", "nvidia corporation",
@@ -52,6 +56,11 @@ def require_notices(folder: Path) -> None:
         if "service" not in executable.name.casefold():
             require_file(executable.parent / "LICENSE.txt")
             require_file(executable.parent / "provenance.json")
+    pawnio = folder / "tools/PawnIO/PawnIO_setup.exe"
+    require_file(pawnio)
+    require_file(pawnio.parent / "provenance.json")
+    if hashlib.sha256(pawnio.read_bytes()).hexdigest() != PAWNIO_SETUP_SHA256:
+        raise ValueError("Bundled PawnIO setup does not match the pinned official 2.2.0 binary.")
 
 
 def collect_entries(root: Path, binary: Path) -> list[tuple[Path, str]]:

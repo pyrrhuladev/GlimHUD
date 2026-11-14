@@ -5,6 +5,8 @@ GlimHUD's original code and project assets are licensed under the [MIT license](
 | Component | Version | License | Source |
 | --- | --- | --- | --- |
 | LibreHardwareMonitorLib | 0.9.6 | Mozilla Public License 2.0 (MPL-2.0) | <https://github.com/LibreHardwareMonitor/LibreHardwareMonitor> |
+| PawnIO.Modules bytecode embedded in LibreHardwareMonitorLib | 0.2.2, verified against the official module archive | GNU Lesser General Public License 2.1 or later (LGPL-2.1-or-later) | <https://github.com/namazso/PawnIO.Modules/tree/0.2.2> |
+| Official signed PawnIO setup, redistributed unchanged | 2.2.0 | Vendor terms permit redistribution of the unmodified installer; all rights reserved | <https://github.com/namazso/PawnIO.Setup/releases/tag/2.2.0> |
 | NAudio.Wasapi / NAudio.Core | 2.2.1 | MIT | <https://github.com/naudio/NAudio> |
 | NetSparkleUpdater.SparkleUpdater | 3.1.0 | MIT | <https://github.com/NetSparkleUpdater/NetSparkle> |
 | NetSparkleUpdater.Chaos.NaCl | 0.9.4 | MIT and upstream public-domain attributions | <https://github.com/NetSparkleUpdater/Chaos.NaCl> |
@@ -21,9 +23,15 @@ GlimHUD's original code and project assets are licensed under the [MIT license](
 
 LibreHardwareMonitor is used without modifying its source. LibreHardwareMonitor, BlackSharp.Core, DiskInfoToolkit, and RAMSPDToolkit source is available at the upstream repositories above. Their MPL-2.0 terms apply to those components independently of GlimHUD's MIT license.
 
+The twelve PawnIO module bytecode resources embedded in the pinned LibreHardwareMonitorLib assembly have their own LGPL-2.1-or-later notices. They match the official PawnIO.Modules 0.2.2 release byte-for-byte; this is distinct from the separate PawnIO kernel driver/installer. The attribution file below retains the exact module copyright notices, source links, resource hashes and the explanation of the older version named in LibreHardwareMonitor's original resource README.
+
+GlimHUD also bundles the complete official signed PawnIO 2.2.0 setup unchanged for user-authorized driver installation. That signed distribution has the vendor terms reproduced below; it is not described here as an LGPL/GPL binary. The separate upstream source-code repositories retain their own licenses.
+
 Retain the following upstream license and attribution files when redistributing the corresponding components:
 
 - [LibreHardwareMonitor](Notices/LibreHardwareMonitor.txt) and [NAudio](Notices/NAudio.txt).
+- PawnIO modules: [attribution and corresponding source links](Notices/PawnIO.Modules.txt), [full LGPL 2.1 text](Notices/PawnIO.Modules.LGPL-2.1.txt), and [verbatim upstream resource README](Notices/PawnIO.Modules.Upstream-README.txt).
+- [Official signed PawnIO setup vendor EULA, redistribution notice and provenance](Notices/PawnIO.Setup.txt).
 - [NetSparkle](Notices/NetSparkle.txt) and [NetSparkle.Chaos.NaCl](Notices/NetSparkle.Chaos.NaCl.txt), including its Bouncy Castle MIT and original algorithm attributions.
 - [BlackSharp.Core](Notices/BlackSharp.Core.txt), [DiskInfoToolkit](Notices/DiskInfoToolkit.txt), and [RAMSPDToolkit-NDD](Notices/RAMSPDToolkit-NDD.txt).
 - [HidSharp](Notices/HidSharp.txt), including its upstream copyright notices and Apache License 2.0 text.

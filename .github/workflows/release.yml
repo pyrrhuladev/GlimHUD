@@ -79,6 +79,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Update feed checks failed.' }
       - name: Fetch verified PresentMon
         run: .\scripts\Get-PresentMon.ps1
+      - name: Fetch verified official PawnIO installer
+        run: .\scripts\Get-PawnIO.ps1
       - name: Publish self-contained Windows x64 build
         run: .\scripts\Publish.ps1 -SelfContained
       - name: Prepare verified Inno Setup compiler

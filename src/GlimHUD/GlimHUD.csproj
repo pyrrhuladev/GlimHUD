@@ -11,7 +11,7 @@
     <RootNamespace>GlimHUD</RootNamespace>
     <ApplicationIcon>Assets\GlimHUD.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.9.0</Version>
+    <Version>0.9.1</Version>
     <Product>GlimHUD</Product>
     <Description>Music and system telemetry above your game.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -30,5 +30,7 @@
     <Resource Include="Assets\GlimHUD-tray.ico" />
     <None Update="Assets\update-public-key.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\tools\PresentMon\PresentMon*.exe;..\..\tools\PresentMon\LICENSE.txt;..\..\tools\PresentMon\provenance.json;..\..\tools\PresentMon\README.md" Link="tools\PresentMon\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\tools\PawnIO\PawnIO_setup.exe" Condition="Exists('..\..\tools\PawnIO\PawnIO_setup.exe')" Link="tools\PawnIO\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\tools\PawnIO\provenance.json;..\..\tools\PawnIO\README.md" Link="tools\PawnIO\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

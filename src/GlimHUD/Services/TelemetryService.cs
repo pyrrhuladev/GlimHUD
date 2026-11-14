@@ -21,6 +21,10 @@ public sealed record TelemetrySnapshot(
     public string? GpuIdentifier { get; init; }
     public IReadOnlyList<GpuTelemetry> AvailableGpus { get; init; } = [];
     public bool CpuLoadUsesUtility { get; init; }
+    public CpuTemperatureState CpuTemperatureState { get; init; } = CpuTemperatureState.SensorUnavailable;
+    public CpuTemperatureAccess? CpuTemperatureAccess { get; init; }
+    public string? CpuTemperatureSource { get; init; }
+    public IReadOnlyList<CpuTemperatureSensorInfo> CpuTemperatureSensors { get; init; } = [];
     public string CpuLoadSource => CpuLoadUsesUtility
         ? L10n.Text("Windows Processor Utility", "Windows: загрузка CPU с учётом частоты")
         : L10n.Text("Windows CPU busy time", "Windows: время занятости CPU");
@@ -48,6 +52,9 @@ public sealed class TelemetryService : IDisposable
     private string? _lastGpuIdentifier;
     private DateTimeOffset _nextInitializationAttempt;
     private CpuTimes? _previousCpuTimes;
+    private CpuTemperatureAccess? _temperatureAccess;
+    private DateTimeOffset _nextAccessProbe;
+    private bool _cpuTemperatureUnavailable;
 
     /// <param name="enableHardwareSensors">
     /// False keeps monitoring entirely on standard Windows CPU/RAM counters, without
@@ -87,6 +94,7 @@ public sealed class TelemetryService : IDisposable
         var performance = _performance.Sample();
         var memory = ReadPhysicalMemory();
         var notes = new List<string>();
+        RefreshTemperatureAccess();
         EnsureComputer(notes);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -105,7 +113,13 @@ public sealed class TelemetryService : IDisposable
         // Processor Utility accounts for frequency/boost, matching the CPU metric
         // used by Windows Task Manager and Steam's performance monitor.
         var cpuLoad = performance.CpuUtilityPercent ?? nativeCpuLoad ?? AverageOrNull(cpus.Select(ReadCpuLoad));
-        var cpuTemperature = MaxOrNull(cpus.Select(ReadCpuTemperature));
+        var updated = hardware.ToHashSet();
+        var cpuTemperatureSensors = cpus.Select(cpu => CpuTemperatureSupport.ReadSensors(cpu, updated)).ToArray();
+        var selectedTemperature = cpuTemperatureSensors.Select(CpuTemperatureSupport.Select)
+            .Where(sensor => sensor is not null).OrderByDescending(sensor => sensor!.Value).FirstOrDefault();
+        var cpuTemperature = selectedTemperature?.Value;
+        _cpuTemperatureUnavailable = cpuTemperature is null;
+        var temperatureState = CpuTemperatureSupport.GetState(_enableHardwareSensors, cpuTemperature.HasValue, _temperatureAccess);
 
         var gpuHardware = hardware.Where(IsGpu).ToArray();
         var gpuNames = gpuHardware.Select(item => item.Name).ToArray();
@@ -130,7 +144,14 @@ public sealed class TelemetryService : IDisposable
         }
 
         if (cpuTemperature is null)
-            notes.Add(L10n.Text("CPU temperature unavailable: sensor or access permissions", "Температура CPU недоступна: датчик или права доступа"));
+            notes.Add(temperatureState switch
+            {
+                CpuTemperatureState.Disabled => L10n.Text("CPU temperature: hardware sensors disabled", "Температура CPU: аппаратные датчики отключены"),
+                CpuTemperatureState.DriverMissing => L10n.Text("CPU temperature: PawnIO driver is not installed", "Температура CPU: драйвер PawnIO не установлен"),
+                CpuTemperatureState.AccessDenied => L10n.Text("CPU temperature: access to PawnIO denied", "Температура CPU: нет доступа к драйверу PawnIO"),
+                CpuTemperatureState.DriverUnavailable => L10n.Text("CPU temperature: PawnIO driver is unavailable", "Температура CPU: драйвер PawnIO недоступен"),
+                _ => L10n.Text("CPU temperature: the sensor returned no reading", "Температура CPU: датчик не вернул значение")
+            });
         if (selectedGpu is null)
             notes.Add(PreferredGpuIdentifier is null ? L10n.Text("No GPU detected", "GPU не обнаружен") : L10n.Text("The selected GPU is unavailable", "Выбранный GPU недоступен"));
         else if (selectedGpu.LoadPercent is null || selectedGpu.TemperatureCelsius is null)
@@ -147,8 +168,32 @@ public sealed class TelemetryService : IDisposable
         {
             GpuIdentifier = selectedGpu?.Identifier,
             AvailableGpus = gpus.ToArray(),
-            CpuLoadUsesUtility = performance.CpuUtilityPercent.HasValue
+            CpuLoadUsesUtility = performance.CpuUtilityPercent.HasValue,
+            CpuTemperatureState = temperatureState,
+            CpuTemperatureAccess = _temperatureAccess,
+            CpuTemperatureSource = selectedTemperature?.Identifier,
+            CpuTemperatureSensors = cpuTemperatureSensors.SelectMany(sensors => sensors)
+                .Select(sensor => sensor with { IsSelected = sensor.Identifier == selectedTemperature?.Identifier }).ToArray()
         };
+    }
+
+    private void RefreshTemperatureAccess()
+    {
+        if (!_enableHardwareSensors) return;
+        var now = DateTimeOffset.UtcNow;
+        if (now < _nextAccessProbe) return;
+        var previousAccessible = _temperatureAccess?.DeviceAccessible == true;
+        _temperatureAccess = CpuTemperatureSupport.ProbeAccess();
+        _nextAccessProbe = now.AddSeconds(10);
+        if (_computer is not null && _cpuTemperatureUnavailable && _temperatureAccess.DeviceAccessible
+            && !previousAccessible)
+        {
+            // LHM creates its CPU PawnIO module handles in the CPU constructor. A
+            // newly available driver cannot repair those old invalid handles itself.
+            try { _computer.Close(); } catch { }
+            _computer = null;
+            _nextInitializationAttempt = DateTimeOffset.MinValue;
+        }
     }
 
     private void EnsureComputer(List<string> notes)
@@ -250,24 +295,6 @@ public sealed class TelemetryService : IDisposable
 
     private static double? ReadCpuLoad(IHardware hardware) => ReadNamedSensor(hardware,
         SensorType.Load, IsPercent, "CPU Total");
-
-    private static double? ReadCpuTemperature(IHardware hardware)
-    {
-        var package = ReadNamedSensor(hardware, SensorType.Temperature, IsTemperature,
-            "CPU Package", "Core (Tctl/Tdie)", "Core (Tdie)", "CPU (Tctl/Tdie)",
-            "CPU (Tdie)", "CPU Die (average)", "Core Max", "Core Average");
-        if (package is not null)
-            return package;
-
-        // "Distance to TjMax" also has Temperature type but is not a temperature.
-        return MaxOrNull(hardware.Sensors
-            .Where(sensor => sensor.SensorType == SensorType.Temperature &&
-                (sensor.Name.StartsWith("CPU Core", StringComparison.OrdinalIgnoreCase) ||
-                 sensor.Name.StartsWith("Core #", StringComparison.OrdinalIgnoreCase) ||
-                 sensor.Name.StartsWith("CCD", StringComparison.OrdinalIgnoreCase)) &&
-                !sensor.Name.Contains("Distance", StringComparison.OrdinalIgnoreCase))
-            .Select(sensor => ValidValue(sensor.Value, IsTemperature)));
-    }
 
     private static double? ReadGpuLoad(IHardware hardware)
     {
