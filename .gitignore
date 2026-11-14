@@ -21,3 +21,4 @@ NVIDIA Corporation/
 .env.*
 !.env.example
 __pycache__/
+*.priv

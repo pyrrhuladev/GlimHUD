@@ -20,6 +20,10 @@ public sealed record TelemetrySnapshot(
     public DateTimeOffset SampledAt { get; init; } = DateTimeOffset.UtcNow;
     public string? GpuIdentifier { get; init; }
     public IReadOnlyList<GpuTelemetry> AvailableGpus { get; init; } = [];
+    public bool CpuLoadUsesUtility { get; init; }
+    public string CpuLoadSource => CpuLoadUsesUtility
+        ? L10n.Text("Windows Processor Utility", "Windows: загрузка CPU с учётом частоты")
+        : L10n.Text("Windows CPU busy time", "Windows: время занятости CPU");
 }
 
 public sealed record GpuTelemetry(
@@ -37,6 +41,7 @@ public sealed class TelemetryService : IDisposable
 {
     private readonly object _sync = new();
     private readonly bool _enableHardwareSensors;
+    private readonly WindowsPerformanceCounters _performance;
     private Computer? _computer;
     private bool _disposed;
     private string? _preferredGpuIdentifier;
@@ -51,6 +56,7 @@ public sealed class TelemetryService : IDisposable
     public TelemetryService(bool enableHardwareSensors = true)
     {
         _enableHardwareSensors = enableHardwareSensors;
+        _performance = new WindowsPerformanceCounters(includeGpu: enableHardwareSensors);
     }
 
     /// <summary>Optional LHM adapter identifier; null selects an active discrete GPU.</summary>
@@ -78,6 +84,7 @@ public sealed class TelemetryService : IDisposable
     {
         // Sample Windows counters even when hardware-library initialization fails.
         var nativeCpuLoad = ReadSystemCpuLoad();
+        var performance = _performance.Sample();
         var memory = ReadPhysicalMemory();
         var notes = new List<string>();
         EnsureComputer(notes);
@@ -95,13 +102,32 @@ public sealed class TelemetryService : IDisposable
             ? string.Join(" / ", cpus.Select(item => item.Name).Distinct())
             : Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER");
 
-        var cpuLoad = AverageOrNull(cpus.Select(ReadCpuLoad)) ?? nativeCpuLoad;
+        // Processor Utility accounts for frequency/boost, matching the CPU metric
+        // used by Windows Task Manager and Steam's performance monitor.
+        var cpuLoad = performance.CpuUtilityPercent ?? nativeCpuLoad ?? AverageOrNull(cpus.Select(ReadCpuLoad));
         var cpuTemperature = MaxOrNull(cpus.Select(ReadCpuTemperature));
 
-        var gpus = hardware.Where(IsGpu).Select(item => new GpuTelemetry(
-            item.Identifier.ToString(), item.Name, ReadGpuLoad(item),
-            ReadGpuTemperature(item), IsDiscreteGpu(item))).ToArray();
+        var gpuHardware = hardware.Where(IsGpu).ToArray();
+        var gpuNames = gpuHardware.Select(item => item.Name).ToArray();
+        var gpus = gpuHardware.Select(item =>
+        {
+            // LHM already supplies global D3D-node counters per adapter. A uniquely
+            // matching DXGI adapter can supplement it without mixing separate GPUs.
+            var load = MaxOrNull(new[] { ReadGpuLoad(item),
+                TelemetryLoadRules.UniqueNativeLoad(item.Name, gpuNames, performance.Gpus) });
+            return new GpuTelemetry(item.Identifier.ToString(), item.Name, load,
+                ReadGpuTemperature(item), IsDiscreteGpu(item));
+        }).ToArray();
         var selectedGpu = SelectGpu(gpus);
+        if (gpus.Length == 0 && PreferredGpuIdentifier is null)
+        {
+            // A DXGI LUID is valid only for this Windows session. It may supply an
+            // automatic reading, but never becomes a persisted manual GPU choice.
+            var nativeGpus = performance.Gpus.Where(gpu => !gpu.IsSoftware)
+                .Select(gpu => new GpuTelemetry(gpu.Identifier, gpu.Name, gpu.LoadPercent, null,
+                    gpu.VendorId == 0x10DE || IsDiscreteGpuName(gpu.Name))).ToArray();
+            selectedGpu = SelectGpu(nativeGpus);
+        }
 
         if (cpuTemperature is null)
             notes.Add(L10n.Text("CPU temperature unavailable: sensor or access permissions", "Температура CPU недоступна: датчик или права доступа"));
@@ -120,7 +146,8 @@ public sealed class TelemetryService : IDisposable
             notes.Count == 0 ? L10n.Text("Sensors connected", "Датчики подключены") : string.Join(". ", notes.Distinct()))
         {
             GpuIdentifier = selectedGpu?.Identifier,
-            AvailableGpus = gpus
+            AvailableGpus = gpus.ToArray(),
+            CpuLoadUsesUtility = performance.CpuUtilityPercent.HasValue
         };
     }
 
@@ -209,7 +236,11 @@ public sealed class TelemetryService : IDisposable
     {
         if (hardware.HardwareType == HardwareType.GpuNvidia)
             return true;
-        var name = hardware.Name;
+        return IsDiscreteGpuName(hardware.Name);
+    }
+
+    private static bool IsDiscreteGpuName(string name)
+    {
         // AMD and Intel have both integrated and discrete devices. Prefer only models
         // that can be identified confidently; the adapter selector remains authoritative.
         return new[] { "Radeon RX", "Radeon Pro", "FirePro", "Radeon R9", "Radeon R7",
@@ -240,12 +271,8 @@ public sealed class TelemetryService : IDisposable
 
     private static double? ReadGpuLoad(IHardware hardware)
     {
-        var core = ReadNamedSensor(hardware, SensorType.Load, IsPercent, "GPU Core");
-        return core ?? MaxOrNull(hardware.Sensors
-            .Where(sensor => sensor.SensorType == SensorType.Load &&
-                (sensor.Name.Equals("D3D 3D", StringComparison.OrdinalIgnoreCase) ||
-                 sensor.Name.Equals("GPU D3D 3D", StringComparison.OrdinalIgnoreCase)))
-            .Select(sensor => ValidValue(sensor.Value, IsPercent)));
+        return TelemetryLoadRules.SelectGpuLoad(hardware.Sensors
+            .Select(sensor => (sensor.Name, sensor.SensorType, sensor.Value)));
     }
 
     private static double? ReadGpuTemperature(IHardware hardware) => ReadNamedSensor(
@@ -322,6 +349,7 @@ public sealed class TelemetryService : IDisposable
             if (_disposed)
                 return;
             _disposed = true;
+            _performance.Dispose();
             try { _computer?.Close(); } catch { /* Shutdown must not fail on a driver error. */ }
             _computer = null;
         }
@@ -359,4 +387,29 @@ public sealed class TelemetryService : IDisposable
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
+}
+
+internal static class TelemetryLoadRules
+{
+    internal static double? UniqueNativeLoad(string name, IReadOnlyList<string> hardwareNames,
+        IReadOnlyList<WindowsGpuReading> nativeGpus)
+    {
+        static bool Same(string left, string right) => string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+        if (hardwareNames.Count(item => Same(item, name)) != 1) return null;
+        var matches = nativeGpus.Where(gpu => !gpu.IsSoftware && Same(gpu.Name, name)).ToArray();
+        return matches.Length == 1 ? matches[0].LoadPercent : null;
+    }
+
+    // Busy engines run in parallel, so their percentages must not be averaged or
+    // added together. Memory-controller/power percentages are different quantities.
+    internal static double? SelectGpuLoad(IEnumerable<(string Name, SensorType Type, float? Value)> sensors)
+    {
+        var measured = sensors.Where(sensor => sensor.Type == SensorType.Load &&
+            (sensor.Name.Equals("GPU Core", StringComparison.OrdinalIgnoreCase) ||
+             sensor.Name.StartsWith("D3D ", StringComparison.OrdinalIgnoreCase) ||
+             sensor.Name.StartsWith("GPU D3D ", StringComparison.OrdinalIgnoreCase)))
+            .Select(sensor => sensor.Value).OfType<float>()
+            .Where(value => float.IsFinite(value) && value is >= 0 and <= 100).ToArray();
+        return measured.Length == 0 ? null : measured.Max();
+    }
 }

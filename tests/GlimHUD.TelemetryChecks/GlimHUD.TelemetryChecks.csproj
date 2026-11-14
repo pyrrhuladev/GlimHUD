@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="../../src/GlimHUD/Localization/L10n.cs" Link="Localization/L10n.cs" />
     <Compile Include="../../src/GlimHUD/Services/TelemetryService.cs" Link="TelemetryService.cs" />
+    <Compile Include="../../src/GlimHUD/Services/WindowsPerformanceCounters.cs" Link="WindowsPerformanceCounters.cs" />
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
   </ItemGroup>
 </Project>

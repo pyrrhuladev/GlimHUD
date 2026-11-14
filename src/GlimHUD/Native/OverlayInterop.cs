@@ -13,26 +13,31 @@ internal sealed class OverlayInterop : IDisposable
     private readonly IntPtr _handle;
     private readonly HwndSource _source;
     private readonly Action<int> _hotkey;
+    private readonly IHotkeyRegistration _registration;
+    private readonly HashSet<int> _registeredHotkeys = [];
+    private bool _disposed;
     public List<int> FailedHotkeys { get; } = [];
 
-    internal OverlayInterop(System.Windows.Window window, Action<int> hotkey)
+    internal OverlayInterop(System.Windows.Window window, Action<int> hotkey, IHotkeyRegistration? registration = null,
+        bool registerHotkeys = true)
     {
         _handle = new WindowInteropHelper(window).Handle;
-        _source = HwndSource.FromHwnd(_handle);
+        _source = HwndSource.FromHwnd(_handle)
+            ?? throw new InvalidOperationException("The overlay has no native window source.");
         _hotkey = hotkey;
+        _registration = registration ?? new WindowsHotkeyRegistration();
         _source.AddHook(WindowProcedure);
-        Register(1, 0x47); // Ctrl+Alt+G
-        Register(2, 0x48); // Ctrl+Alt+H
-        Register(3, 0x53); // Ctrl+Alt+S
-    }
-
-    private void Register(int id, uint virtualKey)
-    {
-        if (!RegisterHotKey(_handle, id, 0x0001 | 0x0002 | 0x4000, virtualKey)) FailedHotkeys.Add(id);
+        if (!registerHotkeys) return;
+        foreach (var binding in HotkeyBindings.All)
+        {
+            if (_registration.Register(_handle, binding)) _registeredHotkeys.Add(binding.Id);
+            else FailedHotkeys.Add(binding.Id);
+        }
     }
 
     internal void SetClickThrough(bool enabled)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         var styles = GetWindowLongPtr(_handle, GwlExStyle).ToInt64();
         styles |= WsExLayered | WsExToolWindow | WsExNoActivate;
         styles = enabled ? styles | WsExTransparent : styles & ~WsExTransparent;
@@ -42,10 +47,15 @@ internal sealed class OverlayInterop : IDisposable
 
     private IntPtr WindowProcedure(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (_disposed) return IntPtr.Zero;
         if (message == 0x0312)
         {
-            _hotkey(wParam.ToInt32());
-            handled = true;
+            var id = wParam.ToInt64();
+            if (id is >= int.MinValue and <= int.MaxValue && _registeredHotkeys.Contains((int)id))
+            {
+                _hotkey((int)id);
+                handled = true;
+            }
         }
         if (message == 0x0021) // WM_MOUSEACTIVATE: buttons must not take keyboard focus from the game.
         {
@@ -57,18 +67,37 @@ internal sealed class OverlayInterop : IDisposable
 
     public void Dispose()
     {
-        for (var i = 1; i <= 3; i++) UnregisterHotKey(_handle, i);
-        _source.RemoveHook(WindowProcedure);
+        if (_disposed) return;
+        _disposed = true;
+        foreach (var id in _registeredHotkeys) _registration.Unregister(_handle, id);
+        _registeredHotkeys.Clear();
+        try { _source.RemoveHook(WindowProcedure); }
+        catch (ObjectDisposedException) { }
     }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+}
+
+internal interface IHotkeyRegistration
+{
+    bool Register(IntPtr window, HotkeyBinding binding);
+    void Unregister(IntPtr window, int id);
+}
+
+internal sealed class WindowsHotkeyRegistration : IHotkeyRegistration
+{
+    public bool Register(IntPtr window, HotkeyBinding binding)
+        => RegisterHotKey(window, binding.Id, binding.Modifiers, binding.VirtualKey);
+
+    public void Unregister(IntPtr window, int id) => UnregisterHotKey(window, id);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
     [DllImport("user32.dll")]
     private static extern bool UnregisterHotKey(IntPtr hwnd, int id);
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 }

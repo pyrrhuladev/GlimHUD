@@ -29,11 +29,12 @@ foreach ($project in $projects) {
     if ($LASTEXITCODE -ne 0) { throw "$($project.BaseName) failed with exit code $LASTEXITCODE." }
 }
 
-$archiveChecks = Join-Path $projectRoot 'tests\test_package_release.py'
-if (-not $SkipArchiveChecks -and (Test-Path -LiteralPath $archiveChecks)) {
+$pythonChecks = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'tests') -Filter 'test_*.py' -File)
+if (-not $SkipArchiveChecks -and $pythonChecks.Count -gt 0) {
     $python = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $python) { throw 'Python 3 is required for archive checks. Install it or use -SkipArchiveChecks for .NET checks only.' }
-    & $python.Source $archiveChecks
-    if ($LASTEXITCODE -ne 0) { throw "Archive checks failed with exit code $LASTEXITCODE." }
+    if (-not $python) { throw 'Python 3 is required for packaging and static checks. Install it or use -SkipArchiveChecks for .NET checks only.' }
+    Write-Host "Discovering $($pythonChecks.Count) Python packaging/static check modules..."
+    & $python.Source -B -m unittest discover -s (Join-Path $projectRoot 'tests') -p 'test_*.py' -v
+    if ($LASTEXITCODE -ne 0) { throw "Python packaging/static checks failed with exit code $LASTEXITCODE." }
 }
 Write-Host "All $($projects.Count) console check projects passed."

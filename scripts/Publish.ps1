@@ -11,7 +11,8 @@ $requiredNotices = @(
     'LICENSE', 'THIRD-PARTY-NOTICES.md', 'Notices\LibreHardwareMonitor.txt', 'Notices\NAudio.txt',
     'Notices\HidSharp.txt', 'Notices\BlackSharp.Core.txt', 'Notices\DiskInfoToolkit.txt',
     'Notices\RAMSPDToolkit-NDD.txt', 'Notices\Mono.Posix.NETStandard.txt',
-    'Notices\Microsoft.NET.txt', 'Notices\Microsoft.NET-ThirdParty.txt'
+    'Notices\Microsoft.NET.txt', 'Notices\Microsoft.NET-ThirdParty.txt',
+    'Notices\NetSparkle.txt', 'Notices\NetSparkle.Chaos.NaCl.txt'
 )
 foreach ($relativePath in $requiredNotices) {
     $requiredPath = Join-Path $projectRoot $relativePath
@@ -47,12 +48,12 @@ $arguments = @('publish', (Join-Path $projectRoot 'src\GlimHUD\GlimHUD.csproj'),
 if ($NoRestore) { $arguments += '--no-restore' }
 & $dotnet @arguments
 if ($LASTEXITCODE -ne 0) { throw "Publishing failed with exit code $LASTEXITCODE." }
-foreach ($name in @('LICENSE', 'README.md', 'THIRD-PARTY-NOTICES.md', 'CONTRIBUTING.md', 'SECURITY.md')) {
+foreach ($name in @('LICENSE', 'README.md', 'CHANGELOG.md', 'THIRD-PARTY-NOTICES.md', 'CONTRIBUTING.md', 'SECURITY.md')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination $outputPath
 }
 $docsSource = Join-Path $projectRoot 'docs'
 if (Test-Path -LiteralPath $docsSource -PathType Container) {
-    Get-ChildItem -LiteralPath $docsSource -File -Recurse | Where-Object { $_.Extension -in '.md', '.txt' } | ForEach-Object {
+    Get-ChildItem -LiteralPath $docsSource -File -Recurse | Where-Object { $_.Extension -in '.md', '.txt', '.png', '.svg' } | ForEach-Object {
         $relativePath = $_.FullName.Substring($docsSource.Length).TrimStart('\', '/')
         $destinationPath = Join-Path (Join-Path $outputPath 'docs') $relativePath
         New-Item -ItemType Directory -Path (Split-Path -Parent $destinationPath) -Force | Out-Null

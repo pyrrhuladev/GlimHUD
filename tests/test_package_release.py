@@ -60,6 +60,7 @@ class ReleaseArchiveChecks(unittest.TestCase):
             "tests/crash.dmp", "tests/__pycache__/fixture.pyc", "src/GlimHUD/obj/cache.json",
             "src/GlimHUD/bin/Debug/fixture.exe", "scripts/.codex/private.json",
             "tools/.git/config", "tools/NVIDIA Corporation/umdlogs/log.dat", "tools/staging.msix",
+            "scripts/NetSparkle_Ed25519.priv", "tools/SIGNING.PRIV", "tools/id_ed25519", "tools/id_rsa",
         )
         for folder in (self.root, self.binary):
             for relative in excluded:
@@ -69,9 +70,23 @@ class ReleaseArchiveChecks(unittest.TestCase):
             self.assertNotIn(relative, names)
             self.assertNotIn("Source/" + relative, names)
 
+    def test_public_update_key_can_be_distributed(self) -> None:
+        public_key = "src/GlimHUD/Assets/update-public-key.pub"
+        for folder in (self.root, self.binary):
+            self.write(folder, public_key)
+        names = self.archive_names()
+        self.assertIn(public_key, names)
+        self.assertIn("Source/" + public_key, names)
+
     def test_missing_source_license_stops_release(self) -> None:
         (self.root / "LICENSE").unlink()
         with self.assertRaisesRegex(ValueError, "LICENSE"):
+            self.archive_names()
+        self.assertFalse(self.output.exists())
+
+    def test_missing_update_crypto_license_stops_release(self) -> None:
+        (self.binary / "Notices/NetSparkle.Chaos.NaCl.txt").unlink()
+        with self.assertRaisesRegex(ValueError, "NetSparkle.Chaos.NaCl"):
             self.archive_names()
         self.assertFalse(self.output.exists())
 

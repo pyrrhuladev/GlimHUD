@@ -7,6 +7,9 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using GlimHUD.Localization;
+using GlimHUD.Models;
+using GlimHUD.Native;
+using GlimHUD.Services;
 using Forms = System.Windows.Forms;
 
 namespace GlimHUD;
@@ -15,8 +18,17 @@ public partial class SettingsWindow : Window
 {
     private readonly OverlayWindow _overlay;
     private readonly DispatcherTimer _saveTimer;
+    private readonly DispatcherTimer _glowSignalTimer;
+    private readonly StartupService _startup = new();
     private bool _syncing = true;
     private int? _pinnedPid;
+    private bool _requestingRestart;
+    private string? _failedProjectUrl;
+    private bool _updateActionPending;
+    private bool _updateActionFailed;
+    private bool _updateInstalling;
+    private bool _updateLinkFailed;
+    private bool _isClosed;
 
     public SettingsWindow(OverlayWindow overlay)
     {
@@ -27,6 +39,8 @@ public partial class SettingsWindow : Window
         if (version is not null) VersionBadge.Text = $"{version.Major}.{version.Minor}.{version.Build}";
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
         _saveTimer.Tick += SaveTimer_Tick;
+        _glowSignalTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+        _glowSignalTimer.Tick += (_, _) => UpdateGlowSignal();
         var settings = overlay.Settings;
         LanguageCombo.ItemsSource = new[] { new Choice("en", "English"), new Choice("ru", "Русский") };
         LanguageCombo.SelectedValue = L10n.NormalizeLanguage(settings.Language);
@@ -38,22 +52,43 @@ public partial class SettingsWindow : Window
         GpuCheck.IsChecked = settings.ShowGpu;
         RamCheck.IsChecked = settings.ShowRam;
         LockedCheck.IsChecked = settings.Locked;
+        SnapGridCheck.IsChecked = settings.SnapToGrid;
         WheelVolumeCheck.IsChecked = settings.ScrollMusicVolume;
         AutoShowCheck.IsChecked = settings.AutoShowInGames;
         WindowsAccentCheck.IsChecked = settings.UseWindowsAccent;
+        GlowEnabledCheck.IsChecked = settings.GlowEnabled;
+        GlowReactiveCheck.IsChecked = settings.GlowReactive;
+        GlowIntensitySlider.Value = settings.GlowIntensity;
+        GlowSensitivitySlider.Value = settings.GlowSensitivity;
+        RefreshGlowStyles();
+        UpdateGlowControls();
         ColorHexBox.Text = settings.CustomAccentColor;
         UpdateAccentControls();
+        TextColorHexBox.Text = settings.TextColor;
+        BackgroundColorHexBox.Text = settings.BackgroundColor;
+        RefreshOverlayColorPresets();
+        UpdateOverlayColor(true, false);
+        UpdateOverlayColor(false, false);
         RefreshGamePaths();
         _pinnedPid = overlay.FpsSnapshot is { IsPinned: true } fps ? fps.ProcessId : null;
         RefreshSnapshots();
         UpdateAppearanceLabels();
+        RefreshStartupState();
+        RefreshUpdateControls();
         _syncing = false;
         _overlay.SnapshotsUpdated += Overlay_SnapshotsUpdated;
         L10n.LanguageChanged += LanguageChanged;
+        _overlay.AppUpdates.Changed += AppUpdates_Changed;
+        Activated += (_, _) => RefreshStartupState();
+        IsVisibleChanged += (_, _) => UpdateGlowSignalMonitoring();
         MaxHeight = Math.Max(540, SystemParameters.WorkArea.Height - 20);
     }
 
-    private void Window_Loaded(object sender, RoutedEventArgs e) => RefreshFpsTargets();
+    private void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        RefreshFpsTargets();
+        UpdateGlowSignalMonitoring();
+    }
 
     private void Overlay_SnapshotsUpdated(object? sender, EventArgs e) => RefreshSnapshots();
 
@@ -80,6 +115,11 @@ public partial class SettingsWindow : Window
             RefreshFpsTargets();
             RefreshGamePaths();
             UpdateAppearanceLabels();
+            RefreshOverlayColorPresets();
+            RefreshGlowStyles();
+            RefreshStartupState();
+            UpdateProjectLinkStatus();
+            RefreshUpdateControls();
         }
         finally { _syncing = wasSyncing; }
     }
@@ -90,6 +130,7 @@ public partial class SettingsWindow : Window
         _syncing = true;
         try
         {
+            RefreshHotkeys();
             var media = _overlay.MediaSnapshot;
             var mediaChoices = new List<Choice> { new("", L10n.Text("Automatic — prefer music", "Автоматически — музыка в приоритете")) };
             if (media is not null)
@@ -111,7 +152,13 @@ public partial class SettingsWindow : Window
             UpdateChoices(GpuCombo, gpuChoices, _overlay.Settings.GpuIdentifier);
             HardwareStatus.Text = hardware is null ? L10n.Text("Connecting to sensors…", "Подключение датчиков…") : string.Join("\n", new[] { hardware.CpuName, hardware.Status }.Where(value => !string.IsNullOrWhiteSpace(value)));
             FpsStatus.Text = _overlay.FpsSnapshot?.Status ?? L10n.Text("Connecting to the frame counter…", "Подключение счётчика кадров…");
+            var fps = _overlay.FpsSnapshot;
+            FpsRecoveryActions.Visibility = fps is { IsRunning: false } ? Visibility.Visible : Visibility.Collapsed;
+            RestartAdminButton.Visibility = fps is { RequiresElevation: true } && AppRestartService.CanRequestElevation
+                ? Visibility.Visible : Visibility.Collapsed;
+            FpsAccessHint.Visibility = RestartAdminButton.Visibility;
             LockedCheck.IsChecked = _overlay.Settings.Locked;
+            SnapGridCheck.IsChecked = _overlay.Settings.SnapToGrid;
             MusicCheck.IsChecked = _overlay.Settings.ShowMusic;
             FpsCheck.IsChecked = _overlay.Settings.ShowFps;
             CpuCheck.IsChecked = _overlay.Settings.ShowCpu;
@@ -119,8 +166,294 @@ public partial class SettingsWindow : Window
             RamCheck.IsChecked = _overlay.Settings.ShowRam;
             WheelVolumeCheck.IsChecked = _overlay.Settings.ScrollMusicVolume;
             AutoShowCheck.IsChecked = _overlay.Settings.AutoShowInGames;
+            GlowEnabledCheck.IsChecked = _overlay.Settings.GlowEnabled;
+            GlowReactiveCheck.IsChecked = _overlay.Settings.GlowReactive;
+            GlowStyleCombo.SelectedValue = GlowStyles.Normalize(_overlay.Settings.GlowStyle);
+            if (!GlowIntensitySlider.IsMouseCaptureWithin) GlowIntensitySlider.Value = _overlay.Settings.GlowIntensity;
+            if (!GlowSensitivitySlider.IsMouseCaptureWithin) GlowSensitivitySlider.Value = _overlay.Settings.GlowSensitivity;
+            UpdateGlowControls();
         }
         finally { _syncing = wasSyncing; }
+    }
+
+    private void GlowOption_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_syncing) return;
+        _overlay.Settings.GlowEnabled = GlowEnabledCheck.IsChecked == true;
+        _overlay.Settings.GlowReactive = GlowReactiveCheck.IsChecked == true;
+        UpdateGlowControls();
+        ApplyAndSave();
+    }
+
+    private void RefreshGlowStyles()
+    {
+        GlowStyleCombo.ItemsSource = GlowStyles.All.Select(style => new Choice(style.Id,
+            (string)FindResource(style.LabelKey))).ToArray();
+        GlowStyleCombo.SelectedValue = GlowStyles.Normalize(_overlay.Settings.GlowStyle);
+    }
+
+    private void GlowStyle_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing) return;
+        _overlay.Settings.GlowStyle = GlowStyles.Normalize(SelectedKey(GlowStyleCombo));
+        UpdateGlowControls();
+        ApplyAndSave();
+    }
+
+    private void GlowIntensity_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncing) return;
+        _overlay.Settings.GlowIntensity = Math.Clamp(e.NewValue, 0, 1);
+        UpdateGlowControls();
+        ApplyAndSave();
+    }
+
+    private void UpdateGlowControls()
+    {
+        var settings = _overlay.Settings;
+        GlowOptions.IsEnabled = settings.GlowEnabled;
+        GlowSensitivityOptions.IsEnabled = settings.GlowReactive;
+        var style = GlowStyles.All.First(item => item.Id == GlowStyles.Normalize(settings.GlowStyle));
+        GlowStyleHint.SetResourceReference(TextBlock.TextProperty, style.DescriptionKey);
+        GlowIntensityValue.Text = $"{Math.Round(settings.GlowIntensity * 100):0}%";
+        GlowSensitivityValue.Text = $"{Math.Round(settings.GlowSensitivity * 100):0}%";
+        var hint = !settings.GlowEnabled || !settings.GlowReactive ? null
+            : _overlay.AudioSnapshot is not { IsAvailable: true } ? "Loc.GlowAudioUnavailable"
+            : !_overlay.GlowAudioAvailable ? "Loc.GlowMeterWaiting"
+            : _overlay.MediaSnapshot is { IsAvailable: true, IsPlaying: false } ? "Loc.GlowWaiting" : null;
+        GlowAudioStatus.Visibility = hint is null ? Visibility.Collapsed : Visibility.Visible;
+        if (hint is not null) GlowAudioStatus.SetResourceReference(TextBlock.TextProperty, hint);
+        UpdateGlowSignalMonitoring();
+    }
+
+    private void UpdateGlowSignalMonitoring()
+    {
+        if (IsLoaded && IsVisible && _overlay.Settings.GlowEnabled && _overlay.Settings.GlowReactive)
+        {
+            UpdateGlowSignal();
+            _glowSignalTimer.Start();
+        }
+        else
+        {
+            _glowSignalTimer.Stop();
+            GlowSignalMeter.Value = 0;
+            GlowSignalValue.Text = "0%";
+        }
+    }
+
+    private void UpdateGlowSignal()
+    {
+        var peak = _overlay.GlowAudioPeak;
+        peak = double.IsFinite(peak) ? Math.Clamp(peak, 0, 1) : 0;
+        GlowSignalMeter.Value = peak;
+        GlowSignalValue.Text = $"{peak * 100:0}%";
+    }
+
+    private void GlowSensitivity_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncing) return;
+        _overlay.Settings.GlowSensitivity = Math.Clamp(e.NewValue, 0, 1);
+        UpdateGlowControls();
+        ApplyAndSave();
+    }
+
+    private void OpenIssues_Click(object sender, RoutedEventArgs e) => OpenProjectLink(ProjectLinks.IssuesUrl);
+
+    private void AppUpdates_Changed(object? sender, EventArgs e)
+    {
+        if (_isClosed || Dispatcher.HasShutdownStarted) return;
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => RefreshUpdateControls());
+            return;
+        }
+        RefreshUpdateControls();
+    }
+
+    private void RefreshUpdateControls()
+    {
+        if (_isClosed) return;
+        var snapshot = _overlay.AppUpdates.Snapshot;
+        var installed = snapshot.IsInstalled && !snapshot.IsPackaged;
+        var busy = _updateActionPending || snapshot.State is UpdateState.Checking or UpdateState.Downloading;
+        var wasSyncing = _syncing;
+        _syncing = true;
+        try
+        {
+            AutomaticUpdatesCheck.IsChecked = _overlay.Settings.CheckForUpdates;
+            AutomaticUpdatesCheck.IsEnabled = installed;
+        }
+        finally { _syncing = wasSyncing; }
+
+        UpdateCurrentVersion.Text = FormatUi("Loc.UpdateCurrentVersion", snapshot.CurrentVersion);
+        UpdateModeHint.SetResourceReference(TextBlock.TextProperty, snapshot.IsPackaged
+            ? "Loc.PackagedUpdatesHint" : installed ? "Loc.AutomaticUpdatesHint" : "Loc.PortableUpdatesHint");
+        var version = snapshot.AvailableVersion ?? "—";
+        var progress = double.IsFinite(snapshot.Progress) ? Math.Clamp(snapshot.Progress, 0, 1) : 0;
+        UpdateStatusText.Text = _updateInstalling ? FormatUi("Loc.UpdateStartingInstaller")
+            : _updateActionFailed ? FormatUi(UpdateFailureResource(snapshot.ErrorCode)) : snapshot.State switch
+            {
+                UpdateState.Disabled => FormatUi("Loc.UpdateDisabled"),
+                UpdateState.Portable => FormatUi("Loc.UpdatePortable"),
+                UpdateState.Checking => FormatUi("Loc.UpdateChecking"),
+                UpdateState.UpToDate => FormatUi("Loc.UpdateLatest"),
+                UpdateState.Available => FormatUi("Loc.UpdateAvailable", version),
+                UpdateState.Downloading => FormatUi("Loc.UpdateDownloading", progress * 100),
+                UpdateState.Downloaded => FormatUi("Loc.UpdateVerified", version),
+                UpdateState.Failed => FormatUi(UpdateFailureResource(snapshot.ErrorCode)),
+                _ => FormatUi("Loc.UpdateReady")
+            };
+        if (_updateActionFailed || snapshot.State == UpdateState.Failed && snapshot.ErrorCode != "Cancelled")
+            UpdateStatusText.Foreground = new SolidColorBrush(Color.FromRgb(246, 162, 159));
+        else UpdateStatusText.ClearValue(TextBlock.ForegroundProperty);
+        UpdateProgressBar.Visibility = _updateInstalling || snapshot.State is UpdateState.Checking or UpdateState.Downloading
+            ? Visibility.Visible : Visibility.Collapsed;
+        UpdateProgressBar.IsIndeterminate = _updateInstalling || snapshot.State == UpdateState.Checking;
+        UpdateProgressBar.Value = progress;
+        CheckUpdatesButton.Visibility = installed ? Visibility.Visible : Visibility.Collapsed;
+        CheckUpdatesButton.IsEnabled = installed && !busy && snapshot.State is not (UpdateState.Disabled or UpdateState.Downloaded);
+        DownloadUpdateButton.Visibility = installed && snapshot.State == UpdateState.Available ? Visibility.Visible : Visibility.Collapsed;
+        DownloadUpdateButton.IsEnabled = !busy;
+        InstallUpdateButton.Visibility = installed && snapshot.State == UpdateState.Downloaded ? Visibility.Visible : Visibility.Collapsed;
+        InstallUpdateButton.IsEnabled = !busy;
+        UpdateLinkError.Visibility = _updateLinkFailed ? Visibility.Visible : Visibility.Collapsed;
+        if (_updateLinkFailed) UpdateLinkError.Text = FormatUi("Loc.ProjectLinkFailed", ProjectLinks.ReleasesUrl);
+    }
+
+    private string FormatUi(string key, params object?[] args)
+        => string.Format(L10n.Culture, (string)FindResource(key), args);
+
+    private static string UpdateFailureResource(string? code) => code switch
+    {
+        "FeedSignature" or "InstallerSignature" or "MissingKey" => "Loc.UpdateUnverified",
+        "ElevatedInstall" => "Loc.UpdateElevated",
+        "Cancelled" => "Loc.UpdateCancelled",
+        _ => "Loc.UpdateFailed"
+    };
+
+    private void AutomaticUpdates_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_syncing) return;
+        _overlay.Settings.CheckForUpdates = AutomaticUpdatesCheck.IsChecked == true;
+        ApplyAndSave();
+    }
+
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        var snapshot = _overlay.AppUpdates.Snapshot;
+        if (!snapshot.IsInstalled || snapshot.IsPackaged || snapshot.State is UpdateState.Disabled or UpdateState.Downloaded or UpdateState.Checking or UpdateState.Downloading) return;
+        await RunUpdateActionAsync(() => _overlay.AppUpdates.CheckAsync(manual: true));
+    }
+
+    private async void DownloadUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        var snapshot = _overlay.AppUpdates.Snapshot;
+        if (!snapshot.IsInstalled || snapshot.IsPackaged || snapshot.State != UpdateState.Available) return;
+        await RunUpdateActionAsync(() => _overlay.AppUpdates.DownloadAsync());
+    }
+
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        var snapshot = _overlay.AppUpdates.Snapshot;
+        if (!snapshot.IsInstalled || snapshot.IsPackaged || snapshot.State != UpdateState.Downloaded) return;
+        await RunUpdateActionAsync(() => _overlay.BeginUpdateInstallAsync(), installing: true);
+    }
+
+    private async Task RunUpdateActionAsync(Func<Task> action, bool installing = false)
+    {
+        if (_updateActionPending || _isClosed) return;
+        _updateActionPending = true;
+        _updateActionFailed = false;
+        _updateInstalling = installing;
+        RefreshUpdateControls();
+        try { await action(); }
+        catch (Exception error)
+        {
+            App.LogError(error);
+            _updateActionFailed = true;
+        }
+        finally
+        {
+            _updateActionPending = false;
+            _updateInstalling = false;
+            RefreshUpdateControls();
+        }
+    }
+
+    private void OpenReleases_Click(object sender, RoutedEventArgs e)
+    {
+        _updateLinkFailed = !ProjectLinks.TryOpen(ProjectLinks.ReleasesUrl);
+        RefreshUpdateControls();
+    }
+
+    private void OpenRepository_Click(object sender, RoutedEventArgs e) => OpenProjectLink(ProjectLinks.RepositoryUrl);
+
+    private void OpenProjectLink(string url)
+    {
+        _failedProjectUrl = ProjectLinks.TryOpen(url) ? null : url;
+        UpdateProjectLinkStatus();
+    }
+
+    private void UpdateProjectLinkStatus()
+    {
+        ProjectLinkStatus.Visibility = _failedProjectUrl is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_failedProjectUrl is not null)
+            ProjectLinkStatus.Text = string.Format(L10n.Culture, (string)FindResource("Loc.ProjectLinkFailed"), _failedProjectUrl);
+    }
+
+    private void RefreshStartupState(bool operationFailed = false)
+    {
+        var syncing = _syncing;
+        _syncing = true;
+        try
+        {
+            var state = _startup.ReadState();
+            StartupCheck.IsChecked = state.IsEnabled;
+            StartupCheck.IsEnabled = state.CanChange;
+            var key = operationFailed ? "Loc.StartupFailed" : state.UnavailableReason switch
+            {
+                StartupUnavailableReason.Packaged => "Loc.StartupPackaged",
+                StartupUnavailableReason.UnsupportedExecutable => "Loc.StartupUnsupported",
+                StartupUnavailableReason.ReadFailed => "Loc.StartupReadFailed",
+                _ when state.IsEnabled && !state.UsesCurrentExecutable => "Loc.StartupOtherCopy",
+                _ => "Loc.StartupHint"
+            };
+            StartupStatus.SetResourceReference(TextBlock.TextProperty, key);
+            StartupStatus.Foreground = new SolidColorBrush(operationFailed ? Color.FromRgb(246, 162, 159) : Color.FromRgb(147, 166, 180));
+        }
+        finally { _syncing = syncing; }
+    }
+
+    private void RefreshHotkeys()
+    {
+        var rows = HotkeyBindings.All.Select(binding => new HotkeyRow(binding.LocalizedGesture,
+            TryFindResource(binding.LabelKey) as string ?? binding.LabelKey)).ToArray();
+        if (HotkeyList.ItemsSource is not IEnumerable<HotkeyRow> existing || !existing.SequenceEqual(rows))
+            HotkeyList.ItemsSource = rows;
+
+        var unavailable = HotkeyBindings.All.Where(binding => _overlay.FailedHotkeys.Contains(binding.Id))
+            .Select(binding => binding.LocalizedGesture).ToArray();
+        HotkeyFailureStatus.Visibility = unavailable.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        HotkeyFailureStatus.Text = unavailable.Length > 0
+            ? L10n.Text("Unavailable shortcuts (in use or blocked by Windows): {0}",
+                "Недоступные сочетания (заняты или заблокированы Windows): {0}", string.Join(", ", unavailable))
+            : string.Empty;
+    }
+
+    private void Startup_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_syncing) return;
+        try
+        {
+            _startup.SetEnabled(StartupCheck.IsChecked == true);
+            RefreshStartupState();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException
+            or System.Security.SecurityException or InvalidOperationException or ArgumentException)
+        {
+            App.LogError(error);
+            RefreshStartupState(operationFailed: true);
+        }
     }
 
     private static void UpdateChoices(ComboBox combo, List<Choice> choices, string? selected)
@@ -184,6 +517,13 @@ public partial class SettingsWindow : Window
     {
         if (_syncing) return;
         _overlay.Settings.ScrollMusicVolume = WheelVolumeCheck.IsChecked == true;
+        ApplyAndSave();
+    }
+
+    private void SnapGrid_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_syncing) return;
+        _overlay.Settings.SnapToGrid = SnapGridCheck.IsChecked == true;
         ApplyAndSave();
     }
 
@@ -279,6 +619,106 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void RefreshOverlayColorPresets()
+    {
+        Choice[] Choices() =>
+        [
+            new("default", (string)FindResource("Loc.ColorPresetDefault")),
+            new("white", (string)FindResource("Loc.ColorPresetWhite")),
+            new("black", (string)FindResource("Loc.ColorPresetBlack")),
+            new("custom", (string)FindResource("Loc.ColorPresetCustom"))
+        ];
+        TextColorPresetCombo.ItemsSource = Choices();
+        BackgroundColorPresetCombo.ItemsSource = Choices();
+        TextColorPresetCombo.SelectedValue = ColorPreset(_overlay.Settings.TextColor, true);
+        BackgroundColorPresetCombo.SelectedValue = ColorPreset(_overlay.Settings.BackgroundColor, false);
+    }
+
+    private static string ColorPreset(string value, bool text)
+    {
+        if (value.Equals(text ? "#F2F8FC" : "#07121D", StringComparison.OrdinalIgnoreCase)) return "default";
+        if (value.Equals("#FFFFFF", StringComparison.OrdinalIgnoreCase)) return "white";
+        return value.Equals("#000000", StringComparison.OrdinalIgnoreCase) ? "black" : "custom";
+    }
+
+    private void OverlayColorPreset_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing) return;
+        var text = ReferenceEquals(sender, TextColorPresetCombo);
+        var combo = text ? TextColorPresetCombo : BackgroundColorPresetCombo;
+        var value = SelectedKey(combo) switch
+        {
+            "default" => text ? "#F2F8FC" : "#07121D",
+            "white" => "#FFFFFF",
+            "black" => "#000000",
+            _ => null
+        };
+        if (value is not null) (text ? TextColorHexBox : BackgroundColorHexBox).Text = value;
+    }
+
+    private void OverlayColorHex_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (!_syncing) UpdateOverlayColor(ReferenceEquals(sender, TextColorHexBox), true);
+    }
+
+    private void OverlayColorHex_LostFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (_syncing) return;
+        var text = ReferenceEquals(sender, TextColorHexBox);
+        var box = text ? TextColorHexBox : BackgroundColorHexBox;
+        var value = TryParseCustomColor(box.Text, out _, out var normalized)
+            ? normalized : text ? _overlay.Settings.TextColor : _overlay.Settings.BackgroundColor;
+        var wasSyncing = _syncing;
+        _syncing = true;
+        try { box.Text = value; UpdateOverlayColor(text, false); }
+        finally { _syncing = wasSyncing; }
+    }
+
+    private void UpdateOverlayColor(bool text, bool save)
+    {
+        var box = text ? TextColorHexBox : BackgroundColorHexBox;
+        var error = text ? TextColorError : BackgroundColorError;
+        var swatch = text ? TextColorSwatch : BackgroundColorSwatch;
+        var preset = text ? TextColorPresetCombo : BackgroundColorPresetCombo;
+        if (!TryParseCustomColor(box.Text, out var color, out var normalized))
+        {
+            error.Visibility = Visibility.Visible;
+            box.BorderBrush = new SolidColorBrush(Color.FromRgb(246, 162, 159));
+            return;
+        }
+        error.Visibility = Visibility.Collapsed;
+        box.ClearValue(BorderBrushProperty);
+        swatch.Background = new SolidColorBrush(color);
+        if (!save) return;
+        if (text) _overlay.Settings.TextColor = normalized;
+        else _overlay.Settings.BackgroundColor = normalized;
+        var wasSyncing = _syncing;
+        _syncing = true;
+        try { preset.SelectedValue = ColorPreset(normalized, text); }
+        finally { _syncing = wasSyncing; }
+        ApplyAndSave();
+    }
+
+    private void ChooseTextColor_Click(object sender, RoutedEventArgs e) => ChooseOverlayColor(true);
+    private void ChooseBackgroundColor_Click(object sender, RoutedEventArgs e) => ChooseOverlayColor(false);
+
+    private void ChooseOverlayColor(bool text)
+    {
+        if (_syncing) return;
+        var box = text ? TextColorHexBox : BackgroundColorHexBox;
+        var value = text ? _overlay.Settings.TextColor : _overlay.Settings.BackgroundColor;
+        if (!TryParseCustomColor(box.Text, out var current, out _) && !TryParseCustomColor(value, out current, out _))
+            current = text ? Services.AccentThemeService.DefaultTextColor : Services.AccentThemeService.DefaultBackgroundColor;
+        using var dialog = new Forms.ColorDialog
+        {
+            FullOpen = true,
+            AnyColor = true,
+            Color = System.Drawing.Color.FromArgb(current.R, current.G, current.B)
+        };
+        if (dialog.ShowDialog(new DialogOwner(new WindowInteropHelper(this).Handle)) == Forms.DialogResult.OK)
+            box.Text = $"#{dialog.Color.R:X2}{dialog.Color.G:X2}{dialog.Color.B:X2}";
+    }
+
     private void RefreshGamePaths()
     {
         var selected = (GamePathsList.SelectedItem as GamePathEntry)?.FullPath;
@@ -359,6 +799,37 @@ public partial class SettingsWindow : Window
     }
 
     private void Fps_DropDownOpened(object? sender, EventArgs e) => RefreshFpsTargets();
+
+    private void RetryFps_Click(object sender, RoutedEventArgs e)
+    {
+        _overlay.RetryFps();
+        RefreshSnapshots();
+    }
+
+    private async void RestartAdmin_Click(object sender, RoutedEventArgs e)
+    {
+        if (_requestingRestart) return;
+        _requestingRestart = true;
+        RestartAdminButton.IsEnabled = false;
+        try
+        {
+            if (System.Windows.Application.Current is App app)
+                await app.RestartWithAdministratorAccessAsync(_overlay);
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception
+            or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            App.LogError(error);
+            System.Windows.MessageBox.Show(this,
+                (string)FindResource("Loc.RestartFailed"),
+                "GlimHUD", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _requestingRestart = false;
+            RestartAdminButton.IsEnabled = true;
+        }
+    }
     private static string? SelectedKey(ComboBox combo) => combo.SelectedValue is string value && value.Length > 0 ? value : null;
 
     private void ApplyAndSave()
@@ -385,16 +856,21 @@ public partial class SettingsWindow : Window
 
     private void Window_Closed(object? sender, EventArgs e)
     {
+        _isClosed = true;
+        _overlay.AppUpdates.Changed -= AppUpdates_Changed;
         _overlay.SnapshotsUpdated -= Overlay_SnapshotsUpdated;
         L10n.LanguageChanged -= LanguageChanged;
         _saveTimer.Stop();
         try { _overlay.SaveSettings(); } catch { /* Overlay reports persistence failures independently. */ }
+        _glowSignalTimer.Stop();
     }
 
     private sealed record Choice(string Key, string Label)
     {
         public override string ToString() => Label;
     }
+
+    private sealed record HotkeyRow(string Gesture, string Description);
 
     private sealed record GamePathEntry(string FullPath)
     {

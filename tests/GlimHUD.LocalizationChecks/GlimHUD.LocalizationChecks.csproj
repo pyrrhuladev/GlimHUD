@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="..\..\src\GlimHUD\Localization\L10n.cs" Link="L10n.cs" />
     <Compile Include="..\..\src\GlimHUD\Localization\UiStrings.cs" Link="UiStrings.cs" />
+    <Compile Include="..\..\src\GlimHUD\Native\HotkeyBindings.cs" Link="HotkeyBindings.cs" />
     <None Include="..\..\src\GlimHUD\SettingsWindow.xaml" Link="SettingsWindow.xaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\src\GlimHUD\OverlayWindow.xaml" Link="OverlayWindow.xaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

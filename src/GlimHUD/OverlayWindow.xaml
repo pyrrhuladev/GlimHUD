@@ -1,15 +1,16 @@
 <Window x:Class="GlimHUD.OverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:GlimHUD.Controls"
         Title="GlimHUD" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True" ShowActivated="False"
-        SizeToContent="WidthAndHeight" FontFamily="Segoe UI" Foreground="#F2F8FC"
+        SizeToContent="WidthAndHeight" FontFamily="Segoe UI" Foreground="{DynamicResource OverlayTextBrush}"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         SourceInitialized="Window_SourceInitialized" Loaded="Window_Loaded" Closed="Window_Closed"
         MouseLeftButtonDown="Window_MouseLeftButtonDown" MouseRightButtonUp="Window_MouseRightButtonUp">
     <Window.Resources>
         <Style TargetType="Button">
-            <Setter Property="Foreground" Value="#EEF7FD"/>
+            <Setter Property="Foreground" Value="{DynamicResource OverlayIconBrush}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="5"/>
@@ -31,7 +32,7 @@
         </Style>
         <Style x:Key="MetricLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="10"/><Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Foreground" Value="#BCD0DE"/><Setter Property="Margin" Value="0,0,0,2"/>
+            <Setter Property="Foreground" Value="{DynamicResource OverlayMutedTextBrush}"/><Setter Property="Margin" Value="0,0,0,2"/>
         </Style>
         <Style x:Key="MetricValue" TargetType="TextBlock">
             <Setter Property="FontSize" Value="22"/><Setter Property="FontWeight" Value="SemiBold"/>
@@ -49,27 +50,28 @@
     </Window.Resources>
     <Grid Margin="5" x:Name="ScaledRoot">
         <Grid.LayoutTransform><ScaleTransform x:Name="PanelScale" ScaleX="1" ScaleY="1"/></Grid.LayoutTransform>
-        <Border x:Name="PanelSurface" CornerRadius="34" BorderThickness="1" BorderBrush="{DynamicResource AccentPanelBorderBrush}" Background="#4D07121D">
-            <Grid Margin="11,8,17,8" Height="50">
+        <controls:ReactiveGlowSurface x:Name="MusicGlow" Layer="Inner" Visibility="Collapsed" IsHitTestVisible="False"/>
+        <Border x:Name="PanelSurface" CornerRadius="34" BorderThickness="1" BorderBrush="{DynamicResource AccentPanelBorderBrush}" Background="{DynamicResource OverlayBackgroundBrush}">
+            <Grid Margin="24,8" Height="50">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <StackPanel x:Name="MusicSection" Orientation="Horizontal" VerticalAlignment="Center">
                         <Border Width="48" Height="48" CornerRadius="12" Background="{DynamicResource AccentCoverBrush}" BorderBrush="{DynamicResource AccentCoverBorderBrush}" BorderThickness="1">
                             <Grid Width="46" Height="46">
                                 <Grid.Clip><RectangleGeometry Rect="0,0,46,46" RadiusX="11" RadiusY="11"/></Grid.Clip>
-                                <TextBlock x:Name="ArtworkPlaceholder" Text="♪" Foreground="{DynamicResource AccentTextBrush}" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="ArtworkPlaceholder" Text="♪" Foreground="{DynamicResource OverlayTextBrush}" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <Image x:Name="Artwork" Stretch="UniformToFill" Visibility="Collapsed"/>
                             </Grid>
                         </Border>
                         <StackPanel Width="145" Margin="12,0,9,0" VerticalAlignment="Center">
                             <TextBlock x:Name="TrackTitle" Text="{DynamicResource Loc.NoPlayback}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock x:Name="TrackArtist" Text="{DynamicResource Loc.OpenPlayer}" Foreground="#B6CBD9" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="TrackArtist" Text="{DynamicResource Loc.OpenPlayer}" Foreground="{DynamicResource OverlayMutedTextBrush}" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
                         <Button x:Name="PreviousButton" Click="Previous_Click" ToolTip="{DynamicResource Loc.PreviousTrack}" AutomationProperties.Name="{DynamicResource Loc.PreviousTrack}">
                             <Path Data="M 0,0 L 2,0 2,12 0,12 Z M 12,0 L 3,6 12,12 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Width="13" Height="13" Stretch="Uniform"/>
                         </Button>
                         <Button x:Name="PlayButton" Width="40" Height="40" Padding="0" Margin="2,0" Click="Play_Click" ToolTip="{DynamicResource Loc.PlayPause}" AutomationProperties.Name="{DynamicResource Loc.PlayPauseAccessible}">
                             <Border Width="32" Height="32" CornerRadius="16" BorderBrush="{DynamicResource AccentBorderBrush}" BorderThickness="1" Background="{DynamicResource AccentSoftBrush}">
-                                <Path x:Name="PlaybackGlyph" Data="M 2,0 L 12,7 2,14 Z" Fill="#EEF9FF" Width="11" Height="13" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Path x:Name="PlaybackGlyph" Data="M 2,0 L 12,7 2,14 Z" Fill="{DynamicResource OverlayTextBrush}" Width="11" Height="13" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                         </Button>
                         <Button x:Name="NextButton" Click="Next_Click" ToolTip="{DynamicResource Loc.NextTrack}" AutomationProperties.Name="{DynamicResource Loc.NextTrack}">
@@ -83,45 +85,45 @@
                                 Margin="5,0,7,0" IsMoveToPointEnabled="True" Focusable="False"
                                 ValueChanged="VolumeSlider_ValueChanged" PreviewMouseLeftButtonUp="VolumeSlider_MouseUp"
                                 Foreground="{DynamicResource AccentBrush}" ToolTip="{DynamicResource Loc.MusicVolume}" AutomationProperties.Name="{DynamicResource Loc.MusicVolume}"/>
-                        <TextBlock x:Name="VolumeValue" Text="—" FontSize="11" Width="33" VerticalAlignment="Center" Foreground="#D5E4ED"/>
-                        <Border Style="{StaticResource Divider}"/>
+                        <TextBlock x:Name="VolumeValue" Text="-" FontSize="11" Width="33" TextAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource OverlayMutedTextBrush}"/>
+                        <Border x:Name="MusicDivider" Style="{StaticResource Divider}"/>
                     </StackPanel>
                     <StackPanel x:Name="FpsSection" Orientation="Horizontal" VerticalAlignment="Center">
                         <StackPanel Width="57">
                             <TextBlock Text="FPS" Style="{StaticResource MetricLabel}"/>
-                            <TextBlock x:Name="FpsValue" Text="-" Foreground="{DynamicResource AccentTextBrush}" FontSize="28" FontWeight="SemiBold" LineHeight="29"/>
+                            <TextBlock x:Name="FpsValue" Text="-" TextAlignment="Left" Foreground="{DynamicResource OverlayTextBrush}" FontSize="28" FontWeight="SemiBold" LineHeight="29"/>
                         </StackPanel>
-                        <Border Style="{StaticResource Divider}"/>
+                        <Border x:Name="FpsDivider" Style="{StaticResource Divider}"/>
                     </StackPanel>
                     <StackPanel x:Name="CpuSection" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE950;" FontSize="24" Foreground="#C2D9E5" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE950;" FontSize="24" Foreground="{DynamicResource OverlayIconBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
                         <StackPanel Width="90">
                             <TextBlock Text="CPU" Style="{StaticResource MetricLabel}"/>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
                                 <TextBlock x:Name="CpuValue" Text="-" Style="{StaticResource MetricValue}" Width="57"/>
-                                <TextBlock x:Name="CpuTemperature" Text="—" FontSize="11" Foreground="#D9E7EF" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
+                                <TextBlock x:Name="CpuTemperature" Text="-" Width="33" TextAlignment="Right" FontSize="11" Foreground="{DynamicResource OverlayMutedTextBrush}" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
                             </StackPanel>
                         </StackPanel>
-                        <Border Style="{StaticResource Divider}"/>
+                        <Border x:Name="CpuDivider" Style="{StaticResource Divider}"/>
                     </StackPanel>
                     <StackPanel x:Name="GpuSection" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="24" Foreground="#C2D9E5" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="24" Foreground="{DynamicResource OverlayIconBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
                         <StackPanel Width="90">
                             <TextBlock Text="GPU" Style="{StaticResource MetricLabel}"/>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock x:Name="GpuValue" Text="-" Style="{StaticResource MetricValue}" Width="57"/>
-                                <TextBlock x:Name="GpuTemperature" Text="—" FontSize="11" Foreground="#D9E7EF" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
+                                <TextBlock x:Name="GpuTemperature" Text="-" Width="33" TextAlignment="Right" FontSize="11" Foreground="{DynamicResource OverlayMutedTextBrush}" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
                             </StackPanel>
                         </StackPanel>
-                        <Border Style="{StaticResource Divider}"/>
+                        <Border x:Name="GpuDivider" Style="{StaticResource Divider}"/>
                     </StackPanel>
                     <StackPanel x:Name="RamSection" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE964;" FontSize="24" Foreground="#C2D9E5" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE964;" FontSize="24" Foreground="{DynamicResource OverlayIconBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
                         <StackPanel Width="134">
-                            <TextBlock Text="RAM" Style="{StaticResource MetricLabel}"/>
+                            <TextBlock Text="{DynamicResource Loc.Ram}" Style="{StaticResource MetricLabel}"/>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock x:Name="RamValue" Text="-" Style="{StaticResource MetricValue}" Width="57"/>
-                                <TextBlock x:Name="RamMemory" Text="—" FontSize="10" Foreground="#D9E7EF" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
+                                <TextBlock x:Name="RamMemory" Text="-" Width="77" TextAlignment="Right" FontSize="10" Foreground="{DynamicResource OverlayMutedTextBrush}" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
                             </StackPanel>
                         </StackPanel>
                     </StackPanel>

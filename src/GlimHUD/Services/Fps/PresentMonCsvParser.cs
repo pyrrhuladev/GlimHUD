@@ -14,14 +14,20 @@ internal sealed class PresentMonCsvParser
     private int _frameTimeIndex = -1;
     private bool _timeIsSeconds;
 
+    public bool HasHeader { get; private set; }
+    public bool SupportsSchema => HasHeader && _processIndex >= 0 && _timeIndex >= 0 && _frameTimeIndex >= 0;
+    public bool LastLineWasHeader { get; private set; }
+
     public bool TryParse(string line, out PresentMonSample sample)
     {
         sample = default;
+        LastLineWasHeader = false;
         if (string.IsNullOrWhiteSpace(line)) return false;
         var values = Split(line);
         var processHeader = Array.FindIndex(values, value => value.Equals("ProcessID", StringComparison.OrdinalIgnoreCase));
         if (processHeader >= 0)
         {
+            HasHeader = LastLineWasHeader = true;
             _processIndex = processHeader;
             _swapChainIndex = Array.FindIndex(values, value => value.Equals("SwapChainAddress", StringComparison.OrdinalIgnoreCase));
             _frameTimeIndex = Array.FindIndex(values, value => value.Equals("MsBetweenPresents", StringComparison.OrdinalIgnoreCase));

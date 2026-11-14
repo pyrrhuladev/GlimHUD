@@ -13,7 +13,14 @@ public sealed record FpsSnapshot(
     string Status,
     bool IsAvailable,
     bool IsRunning,
-    bool IsPinned);
+    bool IsPinned)
+{
+    /// <summary>The last capture attempt failed because Windows denied ETW access.</summary>
+    public bool RequiresElevation { get; init; }
+    public int ObservedProcessCount { get; init; }
+    public long ParsedFrameCount { get; init; }
+    public long RejectedFrameRowCount { get; init; }
+}
 
 public sealed record FpsProcessTarget(int ProcessId, string ProcessName, string WindowTitle)
 {
@@ -49,6 +56,12 @@ public sealed class PresentMonService : IDisposable
     private bool _etwAccessDenied;
     private bool _running;
     private bool _disposed;
+    private readonly Dictionary<int, long> _observedProcesses = [];
+    private long _captureStarted;
+    private long _parsedFrameCount;
+    private long _rejectedFrameRowCount;
+    private bool _headerSeen;
+    private bool _schemaSupported;
 
     public PresentMonService(string? executablePath = null)
     {
@@ -72,6 +85,10 @@ public sealed class PresentMonService : IDisposable
             _lastError = null;
             _etwAccessDenied = false;
             _frames.Clear();
+            _observedProcesses.Clear();
+            _captureStarted = 0;
+            _parsedFrameCount = _rejectedFrameRowCount = 0;
+            _headerSeen = _schemaSupported = false;
             var cancellationToken = _cancellation.Token;
             _captureTask = Task.Run(() => CaptureAsync(cancellationToken));
         }
@@ -101,6 +118,11 @@ public sealed class PresentMonService : IDisposable
             var name = processId.HasValue
                 ? TryGetProcessName(processId.Value)
                 : null;
+            // A collector failure is actionable even when a previously selected game
+            // has exited. Do not mask permission errors behind stale target state.
+            if (!_running)
+                return new(null, processId, name ?? _targetName, _status(), _executablePath is not null, false, _pinnedProcessId.HasValue)
+                { RequiresElevation = _etwAccessDenied };
             if (processId.HasValue && name is null)
             {
                 if (!_pinnedProcessId.HasValue) _automaticProcessId = null;
@@ -108,15 +130,18 @@ public sealed class PresentMonService : IDisposable
             }
 
             if (name is not null) _targetName = name;
-            if (!_running)
-                return new(null, processId, _targetName, _status(), _executablePath is not null, false, _pinnedProcessId.HasValue);
             if (!processId.HasValue)
                 return new(null, null, string.Empty, L10n.Text("Open a game or select a process in Settings", "Откройте игру или выберите процесс в настройках"), true, true, false);
 
             var fps = _frames.GetFramesPerSecond(processId.Value, Stopwatch.GetTimestamp());
             return new(fps, processId, _targetName,
-                fps.HasValue ? $"{_targetName} · Presented FPS" : L10n.Text("{0} · waiting for frames", "{0} · ожидание кадров", _targetName),
-                true, true, _pinnedProcessId.HasValue);
+                fps.HasValue ? L10n.Text("{0} · Presented FPS", "{0} · FPS приложения", _targetName) : GetWaitingStatus(processId.Value),
+                true, true, _pinnedProcessId.HasValue)
+            {
+                ObservedProcessCount = _observedProcesses.Count,
+                ParsedFrameCount = _parsedFrameCount,
+                RejectedFrameRowCount = _rejectedFrameRowCount
+            };
         }
     }
 
@@ -155,13 +180,7 @@ public sealed class PresentMonService : IDisposable
                 RedirectStandardError = true,
                 WorkingDirectory = Path.GetDirectoryName(_executablePath!)!
             };
-            foreach (var argument in new[]
-            {
-                "--output_stdout", "--no_console_stats", "--v1_metrics",
-                "--no_track_gpu", "--no_track_input", "--no_track_display",
-                "--session_name", _sessionName,
-                "--exclude", "GlimHUD.exe", "--exclude", "dwm.exe"
-            }) startInfo.ArgumentList.Add(argument);
+            foreach (var argument in GetCaptureArguments(_sessionName)) startInfo.ArgumentList.Add(argument);
 
             process = new Process { StartInfo = startInfo };
             if (!process.Start()) throw new InvalidOperationException(L10n.Text("PresentMon did not start.", "PresentMon не запустился."));
@@ -169,6 +188,7 @@ public sealed class PresentMonService : IDisposable
             {
                 _capture = process;
                 _running = true;
+                _captureStarted = Stopwatch.GetTimestamp();
                 SetStatus("Waiting for frames", "Ожидание кадров");
             }
             var errorsTask = ReadErrorsAsync(process, cancellationToken);
@@ -177,15 +197,28 @@ public sealed class PresentMonService : IDisposable
             {
                 var line = await process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                 if (line is null) break;
-                if (parser.TryParse(line, out var sample))
+                var parsed = parser.TryParse(line, out var sample);
+                lock (_gate)
+                {
+                    _headerSeen = parser.HasHeader;
+                    _schemaSupported = parser.SupportsSchema;
+                    if (!parsed && parser.SupportsSchema && !parser.LastLineWasHeader && line.Contains(','))
+                        _rejectedFrameRowCount++;
+                }
+                if (parsed)
                 {
                     if (sample.ProcessId == Environment.ProcessId) continue;
                     lock (_gate)
                     {
+                        var received = Stopwatch.GetTimestamp();
+                        _parsedFrameCount++;
+                        if (!_observedProcesses.ContainsKey(sample.ProcessId) && _observedProcesses.Count >= 64)
+                            _observedProcesses.Remove(_observedProcesses.MinBy(item => item.Value).Key);
+                        _observedProcesses[sample.ProcessId] = received;
                         // The collector remains alive across target switches, but
                         // retain frame windows only for the selected application.
                         if (sample.ProcessId == (_pinnedProcessId ?? _automaticProcessId))
-                            _frames.Add(sample, Stopwatch.GetTimestamp());
+                            _frames.Add(sample, received);
                     }
                 }
                 else if (line.Contains("error", StringComparison.OrdinalIgnoreCase) || line.Contains("privilege", StringComparison.OrdinalIgnoreCase))
@@ -198,7 +231,10 @@ public sealed class PresentMonService : IDisposable
             lock (_gate)
             {
                 if (process.ExitCode == 5 || _etwAccessDenied)
-                    SetStatus("ETW access denied. FPS may require running as administrator", "Нет доступа к ETW. Для FPS может потребоваться запуск от администратора");
+                {
+                    _etwAccessDenied = true;
+                    SetStatus("Windows denied FPS capture access. Use Restart as administrator in Settings, then return to your game.", "Windows запретила захват FPS. В настройках выберите перезапуск от администратора, затем вернитесь в игру.");
+                }
                 else if (process.ExitCode == 0)
                     SetStatus("Frame capture stopped", "Сбор кадров остановлен");
                 else
@@ -206,9 +242,16 @@ public sealed class PresentMonService : IDisposable
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
-            lock (_gate) SetStatus("FPS unavailable: {0}", "FPS недоступен: {0}", ex.Message);
+            lock (_gate)
+            {
+                _etwAccessDenied |= ex is UnauthorizedAccessException || ex is System.ComponentModel.Win32Exception { NativeErrorCode: 5 };
+                if (_etwAccessDenied)
+                    SetStatus("Windows denied FPS capture access. Use Restart as administrator in Settings, then return to your game.", "Windows запретила захват FPS. В настройках выберите перезапуск от администратора, затем вернитесь в игру.");
+                else
+                    SetStatus("FPS unavailable: {0}", "FPS недоступен: {0}", ex.Message);
+            }
         }
         finally
         {
@@ -226,6 +269,33 @@ public sealed class PresentMonService : IDisposable
             }
             StopOwnEtwSession();
         }
+    }
+
+    internal static IReadOnlyList<string> GetCaptureArguments(string sessionName) =>
+    [
+        "--output_stdout", "--no_console_stats", "--v1_metrics",
+        "--no_track_gpu", "--no_track_input",
+        // Keep display/kernel present tracking enabled. Disabling it removes
+        // Flip/Present events needed by non-DXGI runtimes such as native Vulkan.
+        "--session_name", sessionName,
+        "--exclude", "GlimHUD.exe", "--exclude", "dwm.exe"
+    ];
+
+    private string GetWaitingStatus(int processId)
+    {
+        if (_headerSeen && !_schemaSupported)
+            return L10n.Text("The frame collector returned an unsupported CSV schema. Retry FPS capture.",
+                "Счётчик кадров вернул неподдерживаемый формат CSV. Повторите захват FPS.");
+        var now = Stopwatch.GetTimestamp();
+        var warmedUp = _captureStarted != 0 && (double)(now - _captureStarted) / Stopwatch.Frequency >= 5;
+        if (warmedUp && _observedProcesses.Any(item => item.Key != processId &&
+            (double)(now - item.Value) / Stopwatch.Frequency <= 3))
+            return L10n.Text("{0}: no frame events for this process; other processes are producing frames. Check the FPS source in Settings or retry capture.",
+                "{0}: от этого процесса кадры не поступают, хотя другие процессы их передают. Проверьте источник FPS в настройках или повторите захват.", _targetName);
+        if (warmedUp && _parsedFrameCount == 0)
+            return L10n.Text("{0}: capture is running but no frame events have arrived. Retry FPS capture in Settings, then return to the game.",
+                "{0}: захват запущен, но события кадров не поступают. Повторите захват FPS в настройках и вернитесь в игру.", _targetName);
+        return L10n.Text("{0} · waiting for frames", "{0} · ожидание кадров", _targetName);
     }
 
     // Store the templates so a language change also updates a stopped collector's status.

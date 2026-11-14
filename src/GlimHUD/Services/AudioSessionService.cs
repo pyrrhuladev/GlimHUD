@@ -59,6 +59,29 @@ public sealed class AudioSessionService : IDisposable
         => RunAsync(() => MutateSession(mediaSourceAppId, preferredSessionId,
             session => session.SimpleAudioVolume.Mute = muted), cancellationToken);
 
+    /// <summary>Reads and toggles the selected app's current mute state under the command gate.</summary>
+    public Task<bool> ToggleMutedAsync(
+        string? mediaSourceAppId,
+        string? preferredSessionId = null,
+        CancellationToken cancellationToken = default)
+        => RunAsync(() => ToggleMuted(mediaSourceAppId, preferredSessionId), cancellationToken);
+
+    private static bool ToggleMuted(string? mediaSourceAppId, string? preferredSessionId)
+    {
+        try
+        {
+            // Do not derive a toggle from the UI's one-second-old snapshot. The same
+            // gate serializes rapid toggles, so the second reads the first's result.
+            var selected = SelectSession(EnumerateSessions(), mediaSourceAppId, preferredSessionId);
+            if (selected is null) return false;
+            var muted = !selected.Info.IsMuted;
+            // Pin the freshly resolved identity before enumerating COM objects for
+            // mutation. A disappearing session must not redirect to another app.
+            return MutateSession(null, selected.Info.Id, session => session.SimpleAudioVolume.Mute = muted);
+        }
+        catch { return false; }
+    }
+
     private async Task<T> RunAsync<T>(Func<T> operation, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);

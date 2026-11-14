@@ -3,20 +3,34 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Stable version to publish (leave empty to use the project version)'
+        required: false
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
+    outputs:
+      release_tag: ${{ steps.release_info.outputs.release_tag }}
+      release_commit: ${{ steps.release_info.outputs.release_commit }}
     defaults:
       run:
         shell: pwsh
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
+      DOTNET_ROLL_FORWARD: LatestMajor
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -24,12 +38,24 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.0.x'
-      - name: Verify tag matches project version
+      - name: Verify release prerequisites
+        id: release_info
+        env:
+          NETSPARKLE_PRIVATE_KEY: ${{ secrets.NETSPARKLE_PRIVATE_KEY }}
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           [xml] $project = Get-Content .\src\GlimHUD\GlimHUD.csproj
           $version = [string] $project.Project.PropertyGroup.Version
-          if ($env:GITHUB_REF_NAME -cne "v$version") { throw 'The tag must exactly match the project version.' }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'The project version must be stable and have three numeric components.' }
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF_NAME -cne "v$version") { throw 'The tag must exactly match the stable project version.' }
+          if ($env:REQUESTED_VERSION -and $env:REQUESTED_VERSION -cne $version) { throw 'The requested version must exactly match the project version.' }
+          if ([string]::IsNullOrWhiteSpace($env:NETSPARKLE_PRIVATE_KEY)) { throw 'Configure the NETSPARKLE_PRIVATE_KEY Actions secret before publishing.' }
+          if (-not (Test-Path -LiteralPath .\src\GlimHUD\Assets\update-public-key.txt)) { throw 'The pinned update public key is missing.' }
           "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          "release_tag=v$version" >> $env:GITHUB_OUTPUT
+          $sourceCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the checked-out source commit.' }
+          "release_commit=$($sourceCommit.Trim())" >> $env:GITHUB_OUTPUT
       - name: Restore and build solution
         run: |
           dotnet restore .\GlimHUD.slnx
@@ -38,17 +64,38 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
       - name: Run console and archive checks
         run: .\scripts\Test.ps1 -NoRestore -NoBuild
+      - name: Install pinned NetSparkle signing tool
+        run: |
+          dotnet tool install NetSparkleUpdater.Tools.AppCastGenerator --version 2.9.0 --tool-path .tools/netsparkle-appcast
+          if ($LASTEXITCODE -ne 0) { throw 'NetSparkle signing tool installation failed.' }
+      - name: Test update feed signing and tamper rejection
+        run: |
+          python -m unittest discover -s tests -p test_update_feed.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Update feed checks failed.' }
       - name: Fetch verified PresentMon
         run: .\scripts\Get-PresentMon.ps1
       - name: Publish self-contained Windows x64 build
         run: .\scripts\Publish.ps1 -SelfContained
-      - name: Archive portable build and calculate checksum
+      - name: Prepare verified Inno Setup compiler
+        run: .\scripts\Get-InnoSetup.ps1
+      - name: Build per-user installer
+        run: .\scripts\Build-Installer.ps1 -InputDirectory .\artifacts\GlimHUD-win-x64 -OutputDirectory .\artifacts\release
+      - name: Archive portable build
         run: |
-          New-Item -ItemType Directory -Path .\artifacts\release -Force | Out-Null
           $archive = ".\artifacts\release\GlimHUD-$env:RELEASE_VERSION-win-x64.zip"
           Compress-Archive -Path .\artifacts\GlimHUD-win-x64\* -DestinationPath $archive
-          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $([System.IO.Path]::GetFileName($archive))" | Set-Content -LiteralPath .\artifacts\release\SHA256SUMS.txt -Encoding ascii
+          Copy-Item -LiteralPath $archive -Destination .\artifacts\release\GlimHUD-win-x64.zip
+      - name: Sign and verify installer and update metadata
+        env:
+          NETSPARKLE_PRIVATE_KEY: ${{ secrets.NETSPARKLE_PRIVATE_KEY }}
+        run: |
+          .\scripts\Build-UpdateFeed.ps1 -InstallerPath ".\artifacts\release\GlimHUD-$env:RELEASE_VERSION-Setup-x64.exe" -Version $env:RELEASE_VERSION -OutputDirectory .\artifacts\release
+      - name: Calculate release checksums
+        run: |
+          $lines = Get-ChildItem -LiteralPath .\artifacts\release -File | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          }
+          [IO.File]::WriteAllLines((Join-Path (Get-Location) 'artifacts/release/SHA256SUMS.txt'), $lines, [Text.UTF8Encoding]::new($false))
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: release-files
@@ -59,7 +106,7 @@ jobs:
   publish:
     needs: build
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -67,13 +114,31 @@ jobs:
         with:
           name: release-files
           path: release-files
-      - name: Create GitHub release
+      - name: Publish complete GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+          RELEASE_COMMIT: ${{ needs.build.outputs.release_commit }}
         run: |
           $files = @(Get-ChildItem -LiteralPath release-files -File | ForEach-Object FullName)
-          gh release create "$env:RELEASE_TAG" @files --verify-tag --title "GlimHUD $env:RELEASE_TAG" --generate-notes
+          gh api "repos/$env:GH_REPO/git/ref/tags/$env:RELEASE_TAG" --silent 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh api "repos/$env:GH_REPO/git/refs" --method POST -f "ref=refs/tags/$env:RELEASE_TAG" -f "sha=$env:RELEASE_COMMIT" --silent
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the release tag for the exact build commit.' }
+          }
+          $tagCommit = gh api "repos/$env:GH_REPO/commits/$env:RELEASE_TAG" --jq .sha
+          if ($LASTEXITCODE -ne 0 -or $tagCommit.Trim() -cne $env:RELEASE_COMMIT) { throw 'The release tag points to another commit. Publish a new version.' }
+          $existing = gh release view "$env:RELEASE_TAG" --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'A published release is immutable. Publish a new version instead.' }
+            gh release upload "$env:RELEASE_TAG" @files --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release asset upload failed.' }
+          } else {
+            gh release create "$env:RELEASE_TAG" @files --draft --verify-tag --title "GlimHUD $env:RELEASE_TAG" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed.' }
+          }
+          gh release edit "$env:RELEASE_TAG" --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+          # Pages runs after this workflow succeeds; the feed cannot precede its installer.

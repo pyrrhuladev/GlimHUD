@@ -18,6 +18,11 @@ public static class SettingsStore
             var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new();
             settings.Language = string.Equals(settings.Language, "ru", StringComparison.OrdinalIgnoreCase) ? "ru" : "en";
             settings.BackgroundOpacity = double.IsFinite(settings.BackgroundOpacity) ? Math.Clamp(settings.BackgroundOpacity, 0.05, 0.85) : 0.30;
+            settings.TextColor = NormalizeColor(settings.TextColor, "#F2F8FC");
+            settings.BackgroundColor = NormalizeColor(settings.BackgroundColor, "#07121D");
+            settings.GlowStyle = GlowStyles.Normalize(settings.GlowStyle);
+            settings.GlowIntensity = double.IsFinite(settings.GlowIntensity) ? Math.Clamp(settings.GlowIntensity, 0, 1) : 0.65;
+            settings.GlowSensitivity = double.IsFinite(settings.GlowSensitivity) ? Math.Clamp(settings.GlowSensitivity, 0, 1) : 0.75;
             settings.Scale = double.IsFinite(settings.Scale) ? Math.Clamp(settings.Scale, 0.65, 1.5) : 1;
             if (settings.Left is { } left && !double.IsFinite(left)) settings.Left = null;
             if (settings.Top is { } top && !double.IsFinite(top)) settings.Top = null;
@@ -42,5 +47,12 @@ public static class SettingsStore
         var temporary = FilePath + ".tmp";
         File.WriteAllText(temporary, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
         File.Move(temporary, FilePath, true);
+    }
+
+    private static string NormalizeColor(string? value, string fallback)
+    {
+        value = value?.Trim();
+        return value is not null && System.Text.RegularExpressions.Regex.IsMatch(value, "^#[0-9A-Fa-f]{6}$")
+            ? value.ToUpperInvariant() : fallback;
     }
 }

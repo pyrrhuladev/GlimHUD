@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows;
@@ -20,6 +21,8 @@ public partial class OverlayWindow : Window
 {
     private readonly MediaSessionService _media = new();
     private readonly AudioSessionService _audio = new();
+    private readonly AudioLevelMonitor _audioLevels = new();
+    private readonly GlowMusicMotion _glowMotion = new();
     private readonly TelemetryService _telemetry = new();
     private readonly PresentMonService _fps = new();
     private readonly GameActivityService _gameActivity = new();
@@ -27,16 +30,32 @@ public partial class OverlayWindow : Window
     private readonly OverlayVisibilityPolicy _visibility = new();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly DispatcherTimer _sampleTimer;
+    private readonly DispatcherTimer _telemetryTimer;
     private readonly DispatcherTimer _fpsTimer;
     private readonly DispatcherTimer _volumeTimer;
+    private readonly DispatcherTimer _glowTimer;
+    private readonly DispatcherTimer _updateCheckTimer;
+    private readonly bool _allowUpdateChecks;
+    private CancellationTokenSource? _automaticUpdateCheck;
+    private Task? _updateCheckTask;
+    private bool _installingUpdate;
+    private long _glowTimestamp;
+    private double _glowSignalPeak;
+    private int _languageRevision;
+    private Controls.ReactiveGlowWindow? _glowWindow;
+    private string? _glowSessionId;
     private readonly bool _initializeServices;
     private readonly bool _allowWheelInterception;
+    private readonly bool _allowHotkeyRegistration;
     private OverlayInterop? _native;
     private MusicWheelInterceptor? _wheel;
     private Forms.NotifyIcon? _tray;
     private Forms.ToolStripMenuItem? _lockItem;
     private SettingsWindow? _settingsWindow;
+    private ContextMenu? _hudMenu;
+    private OverlayMenuInterop? _hudMenuLayer;
     private bool _sampling;
+    private bool _telemetrySampling;
     private bool _applyingSnapshot;
     private bool _loaded;
     private bool _closing;
@@ -44,12 +63,19 @@ public partial class OverlayWindow : Window
     private bool _volumePending;
     private string? _volumeGestureSessionId;
     private string? _volumePendingSessionId;
+    private string? _volumeValueSessionId;
+    private double _volumePendingPercent;
+    private long _volumeChangeVersion;
+    private long _audioSnapshotVolumeVersion;
+    private readonly HashSet<Task> _musicCommands = [];
     private byte[]? _lastArtwork;
     private Task? _sampleTask;
+    private Task? _telemetryTask;
     private Task? _volumeTask;
     private Task? _stopTask;
 
     public AppSettings Settings { get; } = SettingsStore.Load();
+    public AppUpdateService AppUpdates { get; } = new();
     public MediaSnapshot? MediaSnapshot { get; private set; }
     public AudioSnapshot? AudioSnapshot { get; private set; }
     public TelemetrySnapshot? TelemetrySnapshot { get; private set; }
@@ -58,35 +84,58 @@ public partial class OverlayWindow : Window
     public string CurrentAccentHex => _accentTheme.CurrentHex;
     public string WindowsAccentHex => _accentTheme.SystemHex;
     public bool WheelHookInstalled => _wheel?.IsInstalled == true;
+    public bool GlowAudioAvailable => IsFreshGlowAudio(_audioLevels.Snapshot);
+    public double GlowAudioPeak
+    {
+        get
+        {
+            var snapshot = _audioLevels.Snapshot;
+            return IsFreshGlowAudio(snapshot) ? Math.Max(snapshot.Peak, _glowSignalPeak) : 0;
+        }
+    }
+
+    private bool IsFreshGlowAudio(AudioLevelSnapshot snapshot)
+        => snapshot.IsAvailable && snapshot.SessionId == AudioSnapshot?.SessionId
+            && DateTimeOffset.UtcNow - snapshot.SampledAt < TimeSpan.FromMilliseconds(250);
     public event EventHandler? SnapshotsUpdated;
     public IReadOnlyList<int> FailedHotkeys => _native?.FailedHotkeys ?? [];
 
-    public OverlayWindow(bool initializeServices = true, bool allowWheelInterception = true)
+    public OverlayWindow(bool initializeServices = true, bool allowWheelInterception = true,
+        bool allowHotkeyRegistration = true, bool allowUpdateChecks = true)
     {
         _initializeServices = initializeServices;
         _allowWheelInterception = allowWheelInterception;
+        _allowHotkeyRegistration = allowHotkeyRegistration;
+        _allowUpdateChecks = allowUpdateChecks;
         LocalizationService.ApplyLanguage(Settings.Language);
         InitializeComponent();
         _sampleTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _sampleTimer.Tick += (_, _) => BeginSample();
+        _telemetryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _telemetryTimer.Tick += (_, _) => BeginTelemetrySample();
         _fpsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _fpsTimer.Tick += (_, _) => { UpdateFps(); RefreshVisibility(); UpdateWheelRegion(); };
         _volumeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _volumeTimer.Tick += async (_, _) => { _volumeTimer.Stop(); await ScheduleVolumeWriteAsync(); };
+        _glowTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(33) };
+        _glowTimer.Tick += (_, _) => UpdateGlowFrame();
+        _updateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        _updateCheckTimer.Tick += (_, _) => BeginAutomaticUpdateCheck();
+        _accentTheme.AccentChanged += AccentThemeChanged;
         VolumeSlider.PreviewMouseLeftButtonDown += (_, _) => _volumeGestureSessionId = AudioSnapshot?.SessionId;
         MusicSection.PreviewMouseWheel += (_, e) =>
         {
             if (_wheel?.IsInstalled != true && TryAdjustMusicVolume(e.Delta)) e.Handled = true;
         };
-        LocationChanged += (_, _) => UpdateWheelRegion();
-        SizeChanged += (_, _) => UpdateWheelRegion();
+        LocationChanged += (_, _) => { UpdateWheelRegion(); UpdateGlowBounds(); };
+        SizeChanged += (_, _) => { UpdateWheelRegion(); UpdateGlowBounds(); };
         ApplySettings();
     }
 
     private void Window_SourceInitialized(object? sender, EventArgs e)
     {
         if (!_initializeServices) return;
-        _native = new OverlayInterop(this, OnHotkey);
+        _native = new OverlayInterop(this, OnHotkey, registerHotkeys: _allowHotkeyRegistration);
         _native.SetClickThrough(Settings.Locked);
         UpdateWheelRegion();
     }
@@ -102,10 +151,13 @@ public partial class OverlayWindow : Window
         CreateTray();
         _fps.Start();
         _sampleTimer.Start();
+        _telemetryTimer.Start();
         _fpsTimer.Start();
         BeginSample();
+        BeginTelemetrySample();
         RefreshVisibility();
         UpdateWheelRegion();
+        ConfigureAutomaticUpdates();
         if (FailedHotkeys.Count > 0)
             _tray?.ShowBalloonTip(6000, "GlimHUD", L10n.Text("Some hotkeys are unavailable. Use the tray icon to control GlimHUD.", "Некоторые горячие клавиши недоступны. Управление доступно через значок в трее."), Forms.ToolTipIcon.Info);
     }
@@ -138,6 +190,8 @@ public partial class OverlayWindow : Window
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(ResetPosition));
         menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(ExitApplication));
+        menu.Opened += (_, _) => OverlayMenuInterop.BringNativeMenuToFront(menu.Handle);
+        menu.Closed += (_, _) => ConfigureGlow();
         _tray.ContextMenuStrip = menu;
         UpdateTrayText();
         _tray.DoubleClick += (_, _) => Dispatcher.Invoke(OpenSettings);
@@ -155,16 +209,32 @@ public partial class OverlayWindow : Window
         menu.Items[5].Text = L10n.Text("Exit", "Выход");
     }
 
-    private void OnHotkey(int id)
+    private async void OnHotkey(int id)
     {
-        if (id == 1) ToggleLock();
-        else if (id == 2) ToggleVisibility();
-        else if (id == 3) OpenSettings();
+        if (_closing) return;
+        try
+        {
+            switch (id)
+            {
+                case 1: ToggleLock(); break;
+                case 2: ToggleVisibility(); break;
+                case 3: OpenSettings(); break;
+                case 4: await RunTrackedMusicCommandAsync(() => RunMediaCommandAsync(source => _media.TogglePlaybackAsync(source, _shutdown.Token))); break;
+                case 5: await RunTrackedMusicCommandAsync(() => RunMediaCommandAsync(source => _media.PreviousAsync(source, _shutdown.Token))); break;
+                case 6: await RunTrackedMusicCommandAsync(() => RunMediaCommandAsync(source => _media.NextAsync(source, _shutdown.Token))); break;
+                case 7: TryAdjustApplicationVolume(3); break;
+                case 8: TryAdjustApplicationVolume(-3); break;
+                case 9: await RunTrackedMusicCommandAsync(ToggleMusicMuteAsync); break;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) { App.LogError(error); }
     }
 
     public void ToggleLock()
     {
         Settings.Locked = !Settings.Locked;
+        if (Settings.Locked) CloseHudMenu();
         ApplySettings();
         SaveSettings();
     }
@@ -196,12 +266,21 @@ public partial class OverlayWindow : Window
     public void ApplySettings()
     {
         Settings.Language = L10n.NormalizeLanguage(Settings.Language);
+        if (Settings.Language != L10n.Language) _languageRevision++;
+        Settings.GlowStyle = GlowStyles.Normalize(Settings.GlowStyle);
         LocalizationService.ApplyLanguage(Settings.Language);
+        if (MediaSnapshot is { IsAvailable: false })
+        {
+            TrackTitle.SetResourceReference(TextBlock.TextProperty, "Loc.NoPlayback");
+            TrackArtist.SetResourceReference(TextBlock.TextProperty, "Loc.OpenPlayer");
+        }
         if (PanelSurface is null) return;
+        // Live glow has its own always-click-through HWND; the panel's drag area stays unchanged.
+        ScaledRoot.Margin = new Thickness(!_initializeServices && Settings.GlowEnabled
+            ? Math.Ceiling(26 * Math.Clamp(Settings.Scale, .65, 1.5)) + 2 : 5);
         UpdateTrayText();
         _accentTheme.Apply(Settings.UseWindowsAccent, Settings.CustomAccentColor);
-        var alpha = (byte)Math.Round(Math.Clamp(Settings.BackgroundOpacity, .05, .85) * 255);
-        PanelSurface.Background = new SolidColorBrush(Color.FromArgb(alpha, 7, 18, 29));
+        _accentTheme.ApplyOverlayColors(Settings.TextColor, Settings.BackgroundColor, Settings.BackgroundOpacity);
         PanelScale.ScaleX = PanelScale.ScaleY = Math.Clamp(Settings.Scale, .65, 1.5);
         MusicSection.Visibility = Visible(Settings.ShowMusic);
         FpsSection.Visibility = Visible(Settings.ShowFps);
@@ -214,8 +293,12 @@ public partial class OverlayWindow : Window
             Settings.ShowFps = true;
             FpsSection.Visibility = Visibility.Visible;
         }
+        UpdateModuleDividers();
         _telemetry.PreferredGpuIdentifier = Settings.GpuIdentifier;
         _native?.SetClickThrough(Settings.Locked);
+        _hudMenuLayer?.BringToFront();
+        if (_tray?.ContextMenuStrip is { Visible: true } trayMenu)
+            OverlayMenuInterop.BringNativeMenuToFront(trayMenu.Handle);
         if (_lockItem is not null) _lockItem.Checked = Settings.Locked;
         Cursor = Settings.Locked ? Cursors.Arrow : Cursors.SizeAll;
         PanelSurface.ToolTip = Settings.Locked
@@ -226,8 +309,99 @@ public partial class OverlayWindow : Window
             UpdateLayout();
             EnsureVisiblePosition();
             BeginSample();
+            BeginTelemetrySample();
             RefreshVisibility();
             UpdateWheelRegion();
+        }
+        ConfigureGlow();
+        ConfigureAutomaticUpdates();
+    }
+
+    private bool CanCheckAutomatically => _initializeServices && _allowUpdateChecks && _loaded
+        && !_closing && Settings.CheckForUpdates && AppUpdates.Snapshot.IsInstalled
+        && !AppUpdates.Snapshot.IsPackaged;
+
+    private void ConfigureAutomaticUpdates()
+    {
+        if (CanCheckAutomatically)
+        {
+            if (_updateCheckTask is not { IsCompleted: false }) _updateCheckTimer.Start();
+        }
+        else
+        {
+            _updateCheckTimer.Stop();
+            _automaticUpdateCheck?.Cancel();
+        }
+    }
+
+    private void BeginAutomaticUpdateCheck()
+    {
+        _updateCheckTimer.Stop();
+        if (!CanCheckAutomatically || _updateCheckTask is { IsCompleted: false }) return;
+        _updateCheckTask = CheckAutomaticallyAsync();
+    }
+
+    private async Task CheckAutomaticallyAsync()
+    {
+        using var check = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+        _automaticUpdateCheck = check;
+        try { await AppUpdates.CheckAsync(cancellationToken: check.Token); }
+        catch (OperationCanceledException) { }
+        catch (Exception error) { App.LogError(error); }
+        finally
+        {
+            _automaticUpdateCheck = null;
+            _updateCheckTimer.Interval = TimeSpan.FromHours(6);
+            if (CanCheckAutomatically) _updateCheckTimer.Start();
+        }
+    }
+
+    public async Task BeginUpdateInstallAsync()
+    {
+        if (_closing || _installingUpdate) return;
+        _installingUpdate = true;
+        try
+        {
+            var start = await AppUpdates.PrepareInstallAsync(_shutdown.Token);
+            if (start is null) throw new InvalidOperationException("The update could not be verified for installation.");
+            SaveSettings();
+            _settingsWindow?.Close();
+            await StopAsync();
+            try
+            {
+                if (System.Windows.Application.Current is App app) app.ReleaseSingleInstanceForUpdate();
+                using var process = Process.Start(start);
+                if (process is null) throw new InvalidOperationException("Windows did not start the installer.");
+            }
+            catch (Exception error)
+            {
+                App.LogError(error);
+                System.Windows.MessageBox.Show(L10n.Text(
+                    "The installer could not start. Please restart GlimHUD and try again.",
+                    "Не удалось запустить установщик. Перезапустите GlimHUD и повторите попытку."),
+                    "GlimHUD", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            finally { System.Windows.Application.Current.Shutdown(); }
+        }
+        finally { _installingUpdate = false; }
+    }
+
+    private void UpdateModuleDividers()
+    {
+        // A module's separator belongs only between visible neighbors, never at an edge.
+        // Keep each value column at a stable width while the common outer inset stays equal.
+        (FrameworkElement Section, Border? Divider)[] modules =
+        [
+            (MusicSection, MusicDivider), (FpsSection, FpsDivider),
+            (CpuSection, CpuDivider), (GpuSection, GpuDivider), (RamSection, null)
+        ];
+        var visibleAfter = false;
+        for (var index = modules.Length - 1; index >= 0; index--)
+        {
+            var (section, divider) = modules[index];
+            var visible = section.Visibility == Visibility.Visible;
+            if (divider is not null) divider.Visibility = Visible(visible && visibleAfter);
+            visibleAfter |= visible;
         }
     }
 
@@ -248,6 +422,13 @@ public partial class OverlayWindow : Window
         UpdateFps();
     }
 
+    public void RetryFps()
+    {
+        _fps.Start();
+        UpdateFps();
+        SnapshotsUpdated?.Invoke(this, EventArgs.Empty);
+    }
+
     private void BeginSample()
     {
         if (!_initializeServices || _sampling || _closing) return;
@@ -256,11 +437,36 @@ public partial class OverlayWindow : Window
 
     public async Task RefreshSnapshotsAsync()
     {
-        if (_sampling && _sampleTask is not null) await _sampleTask;
-        else
+        if (!_sampling) _sampleTask = SampleAsync();
+        if (!_telemetrySampling) _telemetryTask = SampleTelemetryAsync();
+        await Task.WhenAll(new[] { _sampleTask, _telemetryTask }.OfType<Task>());
+    }
+
+    private void BeginTelemetrySample()
+    {
+        if (!_initializeServices || _telemetrySampling || _closing) return;
+        _telemetryTask = SampleTelemetryAsync();
+    }
+
+    private async Task SampleTelemetryAsync()
+    {
+        if (_telemetrySampling || _closing) return;
+        _telemetrySampling = true;
+        var languageRevision = _languageRevision;
+        try
         {
-            _sampleTask = SampleAsync();
-            await _sampleTask;
+            var hardware = await _telemetry.SampleAsync(_shutdown.Token);
+            if (_closing || languageRevision != _languageRevision) return;
+            TelemetrySnapshot = hardware;
+            RenderTelemetry();
+            SnapshotsUpdated?.Invoke(this, EventArgs.Empty);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) { App.LogError(error); }
+        finally
+        {
+            _telemetrySampling = false;
+            if (!_closing && languageRevision != _languageRevision) BeginTelemetrySample();
         }
     }
 
@@ -268,26 +474,29 @@ public partial class OverlayWindow : Window
     {
         if (_sampling || _closing) return;
         _sampling = true;
+        var languageRevision = _languageRevision;
         try
         {
             var token = _shutdown.Token;
-            var mediaTask = _media.GetSnapshotAsync(Settings.MediaSourceAppId, token);
-            var hardwareTask = _telemetry.SampleAsync(token);
-            await Task.WhenAll(mediaTask, hardwareTask);
-            var media = await mediaTask;
-            var hardware = await hardwareTask;
+            var media = await _media.GetSnapshotAsync(Settings.MediaSourceAppId, token);
+            var audioVersion = _volumeChangeVersion;
             var audio = await _audio.GetSnapshotAsync(media.SourceAppId, Settings.AudioSessionId, token);
-            if (_closing) return;
+            if (_closing || languageRevision != _languageRevision) return;
             MediaSnapshot = media;
-            TelemetrySnapshot = hardware;
             AudioSnapshot = audio;
+            _audioSnapshotVolumeVersion = audioVersion;
+            ConfigureGlow();
             RenderSnapshots();
             UpdateFps();
             SnapshotsUpdated?.Invoke(this, EventArgs.Empty);
         }
         catch (OperationCanceledException) { }
         catch (Exception error) { App.LogError(error); }
-        finally { _sampling = false; }
+        finally
+        {
+            _sampling = false;
+            if (!_closing && languageRevision != _languageRevision) BeginSample();
+        }
     }
 
     private void RenderSnapshots()
@@ -309,8 +518,12 @@ public partial class OverlayWindow : Window
             _applyingSnapshot = true;
             try
             {
-                if (!VolumeSlider.IsMouseCaptureWithin && !_volumePending && !_volumeWriting)
+                if (!VolumeSlider.IsMouseCaptureWithin && !_volumePending && !_volumeWriting
+                    && _audioSnapshotVolumeVersion == _volumeChangeVersion)
+                {
                     VolumeSlider.Value = audio.Volume * 100;
+                    _volumeValueSessionId = audio.SessionId;
+                }
                 VolumeSlider.IsEnabled = MuteButton.IsEnabled = audio.IsAvailable;
                 VolumeValue.Text = audio.IsAvailable ? $"{Math.Round(VolumeSlider.Value):0}%" : "—";
                 VolumeGlyph.Text = audio.IsMuted ? "\uE74F" : "\uE767";
@@ -321,6 +534,10 @@ public partial class OverlayWindow : Window
             }
             finally { _applyingSnapshot = false; }
         }
+    }
+
+    private void RenderTelemetry()
+    {
         if (TelemetrySnapshot is { } hardware)
         {
             CpuValue.Text = Percent(hardware.CpuLoadPercent);
@@ -331,8 +548,14 @@ public partial class OverlayWindow : Window
             RamMemory.Text = hardware.MemoryUsedBytes.HasValue && hardware.MemoryTotalBytes.HasValue
                 ? L10n.Text("{0:0.#}/{1:0.#} GB", "{0:0.#}/{1:0.#} ГБ", hardware.MemoryUsedBytes.Value / 1073741824d, hardware.MemoryTotalBytes.Value / 1073741824d)
                 : "—";
-            CpuSection.ToolTip = hardware.CpuName ?? hardware.Status;
-            GpuSection.ToolTip = hardware.GpuName ?? hardware.Status;
+            CpuSection.ToolTip = string.Join("\n", new[] { hardware.CpuName,
+                hardware.CpuLoadUsesUtility
+                    ? L10n.Text("CPU utility, adjusted for clock speed and boost", "Загрузка CPU с учётом частоты и турборежима")
+                    : L10n.Text("CPU busy time (utility counter unavailable)", "Время занятости CPU (счётчик производительности недоступен)"),
+                hardware.CpuTemperatureCelsius is null ? hardware.Status : null }.Where(text => !string.IsNullOrWhiteSpace(text)));
+            GpuSection.ToolTip = string.Join("\n", new[] { hardware.GpuName,
+                L10n.Text("Busiest GPU engine or GPU core, whichever is higher", "Максимум загрузки движков GPU и ядра GPU"),
+                hardware.GpuTemperatureCelsius is null ? hardware.Status : null }.Where(text => !string.IsNullOrWhiteSpace(text)));
             RamSection.ToolTip = L10n.Text("Physical memory in use", "Занятая физическая оперативная память");
         }
     }
@@ -380,8 +603,113 @@ public partial class OverlayWindow : Window
             GameActivitySnapshot.IsGameActive, GameActivitySnapshot.IsOverlayFocused,
             _settingsWindow?.IsVisible == true);
         if (shouldShow && !IsVisible) Show();
-        else if (!shouldShow && IsVisible) Hide();
+        else if (!shouldShow && IsVisible) { CloseHudMenu(); Hide(); }
         UpdateWheelRegion();
+        ConfigureGlow();
+    }
+
+    private void AccentThemeChanged(object? sender, EventArgs e)
+    {
+        if (_closing) return;
+        MusicGlow.GlowColor = _accentTheme.CurrentColor;
+        if (_glowWindow is { } glow) glow.Surface.GlowColor = _accentTheme.CurrentColor;
+    }
+
+    private bool IsMenuOpen => _hudMenuLayer?.IsOpen == true || _tray?.ContextMenuStrip?.Visible == true;
+
+    private void UpdateGlowBounds()
+    {
+        if (!_closing && !IsMenuOpen && _glowWindow is { IsVisible: true } && IsVisible)
+            _glowWindow.UpdateBounds(PanelSurface, PanelScale.ScaleX);
+    }
+
+    private void ConfigureGlow()
+    {
+        if (_closing) return;
+        var active = Settings.GlowEnabled && Settings.GlowIntensity > 0
+            && (!_initializeServices || IsVisible);
+        MusicGlow.Layer = _initializeServices ? Controls.GlowLayer.Inner : Controls.GlowLayer.Both;
+        MusicGlow.Visibility = Visible(active);
+        if (_initializeServices)
+        {
+            if (active)
+            {
+                _glowWindow ??= new Controls.ReactiveGlowWindow(this);
+                _glowWindow.Surface.Layer = Controls.GlowLayer.Outer;
+                // A popup must retain its z-order while open. The halo needs no
+                // repeated HWND_TOPMOST positioning behind an unchanged panel.
+                if (!IsMenuOpen)
+                    _glowWindow.UpdateBounds(PanelSurface, PanelScale.ScaleX);
+            }
+            else _glowWindow?.Hide();
+        }
+        MusicGlow.Intensity = Settings.GlowIntensity;
+        _glowMotion.Sensitivity = Settings.GlowSensitivity;
+        MusicGlow.EffectStyle = Settings.GlowStyle;
+        if (_glowWindow is { } companion)
+        {
+            companion.Surface.Intensity = Settings.GlowIntensity;
+            companion.Surface.EffectStyle = Settings.GlowStyle;
+        }
+        if (!active)
+        {
+            _audioLevels.Configure(false, null);
+            _glowTimer.Stop();
+            _glowMotion.ResetMusic();
+            _glowSignalPeak = 0;
+            _glowSessionId = null;
+            SetGlowVisuals(0);
+            return;
+        }
+        var source = Settings.GlowReactive && AudioSnapshot is { IsAvailable: true } ? AudioSnapshot.SessionId : null;
+        if (!Settings.GlowReactive || _glowSessionId != source)
+        {
+            _glowMotion.ResetMusic();
+            _glowSignalPeak = 0;
+            _glowSessionId = source;
+        }
+        _audioLevels.Configure(_initializeServices && source is not null, source);
+        SetGlowVisuals(_glowMotion.Level);
+        if (!_initializeServices)
+        {
+            _glowTimer.Stop();
+        }
+        else if (!_glowTimer.IsEnabled)
+        {
+            _glowTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+            _glowTimer.Start();
+        }
+    }
+
+    private void UpdateGlowFrame()
+    {
+        if (_closing || !Settings.GlowEnabled || Settings.GlowIntensity <= 0 || !IsVisible)
+        {
+            ConfigureGlow();
+            return;
+        }
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(_glowTimestamp, now);
+        _glowTimestamp = now;
+        var meter = _audioLevels.ReadFrame();
+        var available = Settings.GlowReactive && IsFreshGlowAudio(meter);
+        _glowSignalPeak = available
+            ? Math.Max(meter.Peak, _glowSignalPeak * Math.Exp(-elapsed.TotalSeconds / .22)) : 0;
+        _glowMotion.Update(meter.Peak, available, elapsed);
+        SetGlowVisuals(_glowMotion.Level);
+    }
+
+    private void SetGlowVisuals(double level)
+    {
+        MusicGlow.Level = level;
+        MusicGlow.Phase = _glowMotion.Phase;
+        MusicGlow.Pulse = level > 0 ? _glowMotion.Pulse : 0;
+        MusicGlow.PulsePosition = _glowMotion.PulsePosition;
+        if (_glowWindow is not { } glow) return;
+        glow.Surface.Level = level;
+        glow.Surface.Phase = MusicGlow.Phase;
+        glow.Surface.Pulse = MusicGlow.Pulse;
+        glow.Surface.PulsePosition = MusicGlow.PulsePosition;
     }
 
     private void UpdateWheelRegion()
@@ -412,25 +740,44 @@ public partial class OverlayWindow : Window
     private bool TryAdjustMusicVolume(int delta)
     {
         if (!_allowWheelInterception || _closing || !IsVisible || !Settings.ShowMusic || !Settings.ScrollMusicVolume
-            || AudioSnapshot is not { IsAvailable: true, SessionId: { Length: > 0 } } audio || delta == 0) return false;
-        var session = _volumeGestureSessionId;
-        _volumeGestureSessionId = audio.SessionId;
+            || delta == 0) return false;
+        return TryAdjustApplicationVolume(delta / 120d * 3d);
+    }
+
+    private bool TryAdjustApplicationVolume(double deltaPercent)
+    {
+        if (_closing || AudioSnapshot is not { IsAvailable: true, SessionId: { Length: > 0 } } audio) return false;
+        var next = MusicVolumeStep.Next(audio.SessionId, _volumeValueSessionId,
+            VolumeSlider.Value, audio.Volume * 100, deltaPercent);
+        if (!next.HasValue) return false;
+        var wasApplying = _applyingSnapshot;
+        _applyingSnapshot = true;
         try
         {
-            VolumeSlider.Value = Math.Clamp(VolumeSlider.Value + delta / 120d * 3d, 0, 100);
+            VolumeSlider.Value = next.Value;
         }
-        finally { _volumeGestureSessionId = session; }
+        finally { _applyingSnapshot = wasApplying; }
+        QueueVolumeWrite(next.Value, audio.SessionId);
         return true;
     }
 
-    private async void Previous_Click(object sender, RoutedEventArgs e) => await RunMediaCommandAsync(source => _media.PreviousAsync(source, _shutdown.Token));
-    private async void Play_Click(object sender, RoutedEventArgs e) => await RunMediaCommandAsync(source => _media.TogglePlaybackAsync(source, _shutdown.Token));
-    private async void Next_Click(object sender, RoutedEventArgs e) => await RunMediaCommandAsync(source => _media.NextAsync(source, _shutdown.Token));
+    private async void Previous_Click(object sender, RoutedEventArgs e) => await RunTrackedMusicCommandAsync(() => RunMediaCommandAsync(source => _media.PreviousAsync(source, _shutdown.Token)));
+    private async void Play_Click(object sender, RoutedEventArgs e) => await RunTrackedMusicCommandAsync(() => RunMediaCommandAsync(source => _media.TogglePlaybackAsync(source, _shutdown.Token)));
+    private async void Next_Click(object sender, RoutedEventArgs e) => await RunTrackedMusicCommandAsync(() => RunMediaCommandAsync(source => _media.NextAsync(source, _shutdown.Token)));
+
+    private async Task RunTrackedMusicCommandAsync(Func<Task> command)
+    {
+        if (_closing) return;
+        var task = command();
+        _musicCommands.Add(task);
+        try { await task; }
+        finally { _musicCommands.Remove(task); }
+    }
 
     private async Task RunMediaCommandAsync(Func<string, Task<bool>> command)
     {
         var displayedSource = MediaSnapshot?.SourceAppId;
-        if (MediaSnapshot is not { IsAvailable: true } || string.IsNullOrWhiteSpace(displayedSource)) return;
+        if (_closing || MediaSnapshot is not { IsAvailable: true } || string.IsNullOrWhiteSpace(displayedSource)) return;
         try
         {
             if (!await command(displayedSource)) TrackArtist.ToolTip = L10n.Text("The player does not support this command", "Плеер не поддерживает эту команду");
@@ -440,12 +787,14 @@ public partial class OverlayWindow : Window
         catch (Exception error) { App.LogError(error); }
     }
 
-    private async void Mute_Click(object sender, RoutedEventArgs e)
+    private async void Mute_Click(object sender, RoutedEventArgs e) => await RunTrackedMusicCommandAsync(ToggleMusicMuteAsync);
+
+    private async Task ToggleMusicMuteAsync()
     {
-        if (AudioSnapshot is not { IsAvailable: true } audio) return;
+        if (_closing || AudioSnapshot is not { IsAvailable: true, SessionId: { Length: > 0 } } audio) return;
         try
         {
-            await _audio.SetMutedAsync(!audio.IsMuted, null, audio.SessionId, _shutdown.Token);
+            await _audio.ToggleMutedAsync(null, audio.SessionId, _shutdown.Token);
             BeginSample();
         }
         catch (OperationCanceledException) { }
@@ -457,10 +806,19 @@ public partial class OverlayWindow : Window
         if (!_loaded || _applyingSnapshot || AudioSnapshot is not { IsAvailable: true }) return;
         var sessionId = _volumeGestureSessionId ?? AudioSnapshot.SessionId;
         if (string.IsNullOrWhiteSpace(sessionId)) return;
+        QueueVolumeWrite(e.NewValue, sessionId);
+    }
+
+    private void QueueVolumeWrite(double percent, string sessionId)
+    {
+        _volumeChangeVersion++;
         _volumePendingSessionId = sessionId;
-        VolumeValue.Text = $"{Math.Round(e.NewValue):0}%";
+        _volumeValueSessionId = sessionId;
+        _volumePendingPercent = percent;
+        VolumeValue.Text = $"{Math.Round(percent):0}%";
         _volumePending = true;
-        _volumeTimer.Stop(); _volumeTimer.Start();
+        // Throttle rather than debounce: held hotkeys must affect audio before release.
+        if (!_volumeTimer.IsEnabled) _volumeTimer.Start();
     }
 
     private async void VolumeSlider_MouseUp(object sender, MouseButtonEventArgs e)
@@ -486,7 +844,7 @@ public partial class OverlayWindow : Window
             while (_volumePending && !_closing)
             {
                 _volumePending = false;
-                var value = (float)(VolumeSlider.Value / 100);
+                var value = (float)(_volumePendingPercent / 100);
                 var targetSession = _volumePendingSessionId;
                 var success = !string.IsNullOrWhiteSpace(targetSession)
                     && await _audio.SetVolumeAsync(value, null, targetSession, _shutdown.Token);
@@ -501,7 +859,13 @@ public partial class OverlayWindow : Window
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (Settings.Locked || IsInteractiveChild(e.OriginalSource as DependencyObject)) return;
-        try { DragMove(); SaveSettings(); }
+        try
+        {
+            using var alignment = OverlayAlignmentGuide.BeginDrag(this, Settings.SnapToGrid, PanelSurface);
+            DragMove();
+            alignment?.CompleteDrag();
+            SaveSettings();
+        }
         catch (InvalidOperationException) { }
     }
 
@@ -527,7 +891,28 @@ public partial class OverlayWindow : Window
         hideItem.Click += (_, _) => { _visibility.Hide(); RefreshVisibility(); };
         menu.Items.Add(settingsItem); menu.Items.Add(lockItem); menu.Items.Add(hideItem);
         menu.PlacementTarget = PanelSurface;
+        CloseHudMenu();
+        _hudMenu = menu;
+        _hudMenuLayer = new OverlayMenuInterop(menu);
+        menu.Closed += (_, _) =>
+        {
+            if (!ReferenceEquals(_hudMenu, menu)) return;
+            _hudMenuLayer?.Dispose();
+            _hudMenuLayer = null;
+            _hudMenu = null;
+            ConfigureGlow();
+        };
         menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void CloseHudMenu()
+    {
+        var menu = _hudMenu;
+        _hudMenu = null;
+        _hudMenuLayer?.Dispose();
+        _hudMenuLayer = null;
+        if (menu is not null) menu.IsOpen = false;
     }
 
     private void ResetPosition()
@@ -573,12 +958,19 @@ public partial class OverlayWindow : Window
     private async Task StopCoreAsync()
     {
         _closing = true;
-        _sampleTimer.Stop(); _fpsTimer.Stop(); _volumeTimer.Stop();
+        CloseHudMenu();
+        _sampleTimer.Stop(); _telemetryTimer.Stop(); _fpsTimer.Stop(); _volumeTimer.Stop(); _glowTimer.Stop();
         _volumePending = false;
+        _updateCheckTimer.Stop();
         _shutdown.Cancel();
+        var updatesStopped = AppUpdates.StopAsync();
         _wheel?.Dispose();
         _wheel = null;
+        _accentTheme.AccentChanged -= AccentThemeChanged;
         _accentTheme.Dispose();
+        _glowWindow?.Close();
+        _glowWindow = null;
+        _audioLevels.Dispose();
         _gameActivity.Dispose();
         _native?.Dispose();
         _native = null;
@@ -589,7 +981,7 @@ public partial class OverlayWindow : Window
         _fps.Dispose();
         try
         {
-            var pending = new[] { _sampleTask, _volumeTask }.Where(task => task is not null).Cast<Task>();
+            var pending = new[] { _sampleTask, _telemetryTask, _volumeTask, _updateCheckTask, updatesStopped }.OfType<Task>().Concat(_musicCommands.ToArray());
             await Task.WhenAll(pending);
         }
         catch (OperationCanceledException) { }

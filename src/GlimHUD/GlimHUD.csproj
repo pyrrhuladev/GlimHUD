@@ -11,7 +11,7 @@
     <RootNamespace>GlimHUD</RootNamespace>
     <ApplicationIcon>Assets\GlimHUD.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.3.0</Version>
+    <Version>0.7.0</Version>
     <Product>GlimHUD</Product>
     <Description>Music and system telemetry above your game.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -23,10 +23,12 @@
     <Using Remove="System.Drawing" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageReference Include="NetSparkleUpdater.SparkleUpdater" Version="3.1.0" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\GlimHUD.ico" />
     <Resource Include="Assets\GlimHUD-tray.ico" />
+    <None Update="Assets\update-public-key.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\tools\PresentMon\PresentMon*.exe;..\..\tools\PresentMon\LICENSE.txt;..\..\tools\PresentMon\provenance.json;..\..\tools\PresentMon\README.md" Link="tools\PresentMon\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

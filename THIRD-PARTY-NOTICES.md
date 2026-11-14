@@ -6,6 +6,8 @@ GlimHUD's original code and project assets are licensed under the [MIT license](
 | --- | --- | --- | --- |
 | LibreHardwareMonitorLib | 0.9.6 | Mozilla Public License 2.0 (MPL-2.0) | <https://github.com/LibreHardwareMonitor/LibreHardwareMonitor> |
 | NAudio.Wasapi / NAudio.Core | 2.2.1 | MIT | <https://github.com/naudio/NAudio> |
+| NetSparkleUpdater.SparkleUpdater | 3.1.0 | MIT | <https://github.com/NetSparkleUpdater/NetSparkle> |
+| NetSparkleUpdater.Chaos.NaCl | 0.9.4 | MIT and upstream public-domain attributions | <https://github.com/NetSparkleUpdater/Chaos.NaCl> |
 | BlackSharp.Core | 1.0.7 | Mozilla Public License 2.0 (MPL-2.0) | <https://github.com/Blacktempel/BlackSharp> |
 | DiskInfoToolkit | 1.1.2 | Mozilla Public License 2.0 (MPL-2.0) | <https://github.com/Blacktempel/DiskInfoToolkit> |
 | RAMSPDToolkit-NDD | 1.4.2 | Mozilla Public License 2.0 (MPL-2.0) | <https://github.com/Blacktempel/RAMSPDToolkit> |
@@ -22,6 +24,7 @@ LibreHardwareMonitor is used without modifying its source. LibreHardwareMonitor,
 Retain the following upstream license and attribution files when redistributing the corresponding components:
 
 - [LibreHardwareMonitor](Notices/LibreHardwareMonitor.txt) and [NAudio](Notices/NAudio.txt).
+- [NetSparkle](Notices/NetSparkle.txt) and [NetSparkle.Chaos.NaCl](Notices/NetSparkle.Chaos.NaCl.txt), including its Bouncy Castle MIT and original algorithm attributions.
 - [BlackSharp.Core](Notices/BlackSharp.Core.txt), [DiskInfoToolkit](Notices/DiskInfoToolkit.txt), and [RAMSPDToolkit-NDD](Notices/RAMSPDToolkit-NDD.txt).
 - [HidSharp](Notices/HidSharp.txt), including its upstream copyright notices and Apache License 2.0 text.
 - [Mono.Posix.NETStandard](Notices/Mono.Posix.NETStandard.txt). Its package's license link resolves to the upstream Mono license compendium; the Mono class libraries, including Mono.Posix, use MIT. Other components enumerated in that compendium retain the licenses specified there.

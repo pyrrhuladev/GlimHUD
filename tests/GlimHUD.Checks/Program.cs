@@ -9,11 +9,36 @@ public static class Program
 {
     public static int Main(string[] args)
     {
+        if (args.Contains("--fixture-wait")) { Thread.Sleep(8000); return 0; }
         // End-to-end fixture: the service starts this test apphost using the real
         // PresentMon arguments and receives a multiline stderr failure.
         if (args.Contains("--terminate_existing_session")) return 0;
         if (args.Contains("--output_stdout"))
         {
+            var fixtureMode = Environment.GetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE");
+            if (fixtureMode == "success") return 0;
+            if (fixtureMode == "exit5") return 5;
+            if (fixtureMode is "vulkan" or "unsupported-schema")
+            {
+                // Native Vulkan has no DXGI present events. The fixture deliberately
+                // has no output if the required display/kernel tracking was disabled.
+                if (args.Contains("--no_track_display")) { Thread.Sleep(2000); return 0; }
+                var target = Environment.GetEnvironmentVariable("GLIMHUD_FPS_FIXTURE_PID");
+                if (fixtureMode == "unsupported-schema")
+                {
+                    Console.WriteLine("Application,ProcessID,CPUStartTime,MsGPUTime");
+                    Console.WriteLine($"enshrouded.exe,{target},2000,5");
+                }
+                else
+                {
+                    Console.WriteLine("Application,ProcessID,SwapChainAddress,PresentRuntime,TimeInSeconds,MsBetweenPresents,MsInPresentAPI");
+                    Console.WriteLine($"enshrouded.exe,{target},0,Other,0.0,0.0,0.0");
+                    for (var frame = 1; frame <= 60; frame++)
+                        Console.WriteLine(FormattableString.Invariant($"enshrouded.exe,{target},0,Other,{frame / 60d:0.000000},{1000d / 60:0.000000},0.0"));
+                }
+                Thread.Sleep(4000);
+                return 0;
+            }
             Console.Error.WriteLine("error: failed to start trace session (access denied).");
             Console.Error.WriteLine("Run with the appropriate user group membership.");
             Console.Error.WriteLine("See README.md for more details.");
@@ -23,9 +48,11 @@ public static class Program
         {
             CheckCsv();
             CheckFrameWindows();
+            CheckCaptureArguments();
+            CheckVulkanCaptureFixture();
             CheckUnavailableTool();
             CheckMultilinePermissionError();
-            Console.WriteLine("PASS: CSV parsing, source-time FPS, swap-chain/PID isolation, stale expiry, stream limits, unavailable tool, multiline ETW permission error.");
+            Console.WriteLine("PASS: DXGI/Vulkan CSV, kernel capture flags, source-time FPS, PID/swap-chain isolation, schema diagnostics, staleness, ETW recovery and retry.");
             return 0;
         }
         catch (Exception exception)
@@ -52,6 +79,80 @@ public static class Program
         // Failing closed is essential: unrelated performance columns are not frame intervals.
         parser.TryParse("Application,ProcessID,CPUStartTime,MsGPUTime", out _);
         Check(!parser.TryParse("game.exe,100,2000,5", out _), "An unsupported schema must not fabricate FPS.");
+        Check(parser.HasHeader && !parser.SupportsSchema, "Unsupported headers must be distinguishable from waiting for a first frame.");
+
+        parser.TryParse("Application,ProcessID,SwapChainAddress,PresentRuntime,TimeInSeconds,MsBetweenPresents,MsInPresentAPI", out _);
+        Check(parser.SupportsSchema && parser.LastLineWasHeader, "A supported Vulkan header must recover after a schema change.");
+        Check(parser.TryParse("enshrouded.exe,7240,0,Other,12.500000,16.666667,0.000000", out var vulkan),
+            "A non-DXGI runtime with zero swap-chain address and zero API duration is a valid present.");
+        Check(vulkan.ProcessId == 7240 && vulkan.SwapChain == "0" && vulkan.TimeMilliseconds == 12500 && !parser.LastLineWasHeader,
+            "Native Vulkan identity/time must not be discarded or confused with GPU timing.");
+    }
+
+    private static void CheckCaptureArguments()
+    {
+        var arguments = PresentMonService.GetCaptureArguments("GlimHUD-fixture");
+        Check(!arguments.Contains("--no_track_display"), "Kernel/display present events are required for non-DXGI renderers.");
+        Check(arguments.Contains("--no_track_gpu") && arguments.Contains("--no_track_input"),
+            "Extra GPU timing/input collection remains unnecessary for the FPS counter.");
+        Check(arguments.Contains("--v1_metrics") && arguments.Contains("--output_stdout"),
+            "Capture output must retain the supported CSV protocol.");
+        Check(!arguments.Contains("--restart_as_admin"), "The collector must not launch an unrequested permission dialog.");
+    }
+
+    private static void CheckVulkanCaptureFixture()
+    {
+        var executable = Path.Combine(AppContext.BaseDirectory, "GlimHUD.Checks.exe");
+        var sleeperStart = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true };
+        sleeperStart.ArgumentList.Add("--fixture-wait");
+        using var target = Process.Start(sleeperStart) ?? throw new InvalidOperationException("Could not start the owned FPS target fixture.");
+        var previousMode = Environment.GetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE");
+        var previousPid = Environment.GetEnvironmentVariable("GLIMHUD_FPS_FIXTURE_PID");
+        try
+        {
+            Environment.SetEnvironmentVariable("GLIMHUD_FPS_FIXTURE_PID", target.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Environment.SetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE", "vulkan");
+            using (var service = new PresentMonService(executable))
+            {
+                service.SetTargetProcess(target.Id);
+                service.Start();
+                var deadline = Stopwatch.StartNew();
+                FpsSnapshot snapshot;
+                do
+                {
+                    Thread.Sleep(20);
+                    snapshot = service.GetSnapshot();
+                } while (snapshot.FramesPerSecond is null && deadline.Elapsed < TimeSpan.FromSeconds(3));
+                Near(snapshot.FramesPerSecond, 60, "Native Vulkan presents did not reach the real service stream.", 0.01);
+                Check(snapshot.IsRunning && snapshot.IsPinned && snapshot.ProcessId == target.Id && !snapshot.RequiresElevation,
+                    "A pinned Vulkan frame stream must remain its exact source without an unrelated elevation warning.");
+                Check(snapshot.ParsedFrameCount == 60 && snapshot.ObservedProcessCount == 1 && snapshot.RejectedFrameRowCount == 1,
+                    "Capture diagnostics must count valid frames and the unavailable first interval separately.");
+            }
+
+            Environment.SetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE", "unsupported-schema");
+            using (var service = new PresentMonService(executable))
+            {
+                service.SetTargetProcess(target.Id);
+                service.Start();
+                var deadline = Stopwatch.StartNew();
+                FpsSnapshot snapshot;
+                do
+                {
+                    Thread.Sleep(20);
+                    snapshot = service.GetSnapshot();
+                } while (!snapshot.Status.Contains("unsupported CSV", StringComparison.Ordinal) && deadline.Elapsed < TimeSpan.FromSeconds(3));
+                Check(snapshot.FramesPerSecond is null && snapshot.Status.Contains("unsupported CSV", StringComparison.Ordinal),
+                    "An unsupported collector schema must show an actionable error, not wait forever.");
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE", previousMode);
+            Environment.SetEnvironmentVariable("GLIMHUD_FPS_FIXTURE_PID", previousPid);
+            if (!target.HasExited) target.Kill();
+            target.WaitForExit(1500);
+        }
     }
 
     private static void CheckFrameWindows()
@@ -92,6 +193,7 @@ public static class Program
         service.Start();
         var snapshot = service.GetSnapshot();
         Check(!snapshot.IsAvailable && !snapshot.IsRunning && snapshot.FramesPerSecond is null, "Missing dependency must leave FPS unavailable.");
+        Check(!snapshot.RequiresElevation, "A missing dependency must not suggest an administrator restart.");
         Check(!string.IsNullOrWhiteSpace(snapshot.Status), "Missing dependency must have a diagnostic.");
         Check(snapshot.Status.StartsWith("PresentMon is not installed", StringComparison.Ordinal), "Missing dependency status defaults to English.");
         try
@@ -121,10 +223,41 @@ public static class Program
         {
             Thread.Sleep(25);
             snapshot = service.GetSnapshot();
-        } while ((snapshot.IsRunning || !snapshot.Status.Contains("ETW", StringComparison.OrdinalIgnoreCase)) && deadline.Elapsed < TimeSpan.FromSeconds(8));
+        } while ((snapshot.IsRunning || !snapshot.RequiresElevation) && deadline.Elapsed < TimeSpan.FromSeconds(8));
         Check(snapshot.FramesPerSecond is null && !snapshot.IsRunning, "Permission failure must stop capture and leave FPS unavailable.");
-        Check(snapshot.Status.Contains("ETW", StringComparison.OrdinalIgnoreCase) && snapshot.Status.Contains("administrator", StringComparison.OrdinalIgnoreCase),
+        Check(snapshot.RequiresElevation && snapshot.Status.Contains("administrator", StringComparison.OrdinalIgnoreCase),
             $"Trailing README help erased the ETW permission error: {snapshot.Status}");
+        service.SetTargetProcess(int.MaxValue);
+        Check(service.GetSnapshot().RequiresElevation && service.GetSnapshot().Status == snapshot.Status,
+            "An exited selected game must not hide the recoverable capture permission error.");
+
+        var previousMode = Environment.GetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE");
+        try
+        {
+            Environment.SetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE", "success");
+            deadline.Restart();
+            do
+            {
+                service.Start();
+                Thread.Sleep(25);
+                snapshot = service.GetSnapshot();
+            } while ((snapshot.IsRunning || snapshot.RequiresElevation || snapshot.Status != "Frame capture stopped")
+                && deadline.Elapsed < TimeSpan.FromSeconds(8));
+            Check(!snapshot.RequiresElevation && !snapshot.IsRunning && snapshot.Status == "Frame capture stopped",
+                "Retry must clear the previous permission error after a successful capture attempt.");
+
+            Environment.SetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE", "exit5");
+            deadline.Restart();
+            do
+            {
+                service.Start();
+                Thread.Sleep(25);
+                snapshot = service.GetSnapshot();
+            } while ((snapshot.IsRunning || !snapshot.RequiresElevation) && deadline.Elapsed < TimeSpan.FromSeconds(8));
+            Check(snapshot.RequiresElevation && !snapshot.IsRunning,
+                "Native access-denied exit code 5 must expose the same recovery action without stderr text.");
+        }
+        finally { Environment.SetEnvironmentVariable("GLIMHUD_FPS_CHECK_MODE", previousMode); }
     }
 
     private static void AddFrames(PresentMonFrameAccumulator accumulator, int processId, string swapChain, int count, double frameTime, long now)

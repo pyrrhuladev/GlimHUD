@@ -11,6 +11,8 @@ namespace GlimHUD.Services;
 public sealed class AccentThemeService : IDisposable
 {
     public static readonly Color DefaultColor = Color.FromRgb(102, 223, 255);
+    public static readonly Color DefaultTextColor = Color.FromRgb(242, 248, 252);
+    public static readonly Color DefaultBackgroundColor = Color.FromRgb(7, 18, 29);
     private readonly Dispatcher _dispatcher;
     private UISettings? _uiSettings;
     private bool _useSystemColor = true;
@@ -48,6 +50,26 @@ public sealed class AccentThemeService : IDisposable
         _useSystemColor = useSystemColor;
         _customColor = customColor;
         ApplyCurrentColor();
+    }
+
+    /// <summary>Overlay foreground and background are independent of the accent and each other.</summary>
+    public void ApplyOverlayColors(string? textHex, string? backgroundHex, double opacity)
+    {
+        if (_disposed) return;
+        if (!_dispatcher.CheckAccess())
+        {
+            Post(() => ApplyOverlayColors(textHex, backgroundHex, opacity));
+            return;
+        }
+        var text = TryParseHex(textHex, out var parsedText) ? parsedText : DefaultTextColor;
+        var background = TryParseHex(backgroundHex, out var parsedBackground) ? parsedBackground : DefaultBackgroundColor;
+        var alpha = (byte)Math.Round((double.IsFinite(opacity) ? Math.Clamp(opacity, 0.05, 0.85) : 0.30) * 255);
+        var resources = System.Windows.Application.Current?.Resources;
+        if (resources is null) return;
+        resources["OverlayTextBrush"] = Brush(text);
+        resources["OverlayMutedTextBrush"] = Brush(text, 210);
+        resources["OverlayIconBrush"] = Brush(text, 225);
+        resources["OverlayBackgroundBrush"] = Brush(background, alpha);
     }
 
     public static bool TryParseHex(string? value, out Color color)

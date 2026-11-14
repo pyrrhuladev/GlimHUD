@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="src/GlimHUD/GlimHUD.csproj" />
   <Folder Name="/Tests/">
+    <Project Path="tests/GlimHUD.UpdateChecks/GlimHUD.UpdateChecks.csproj" />
     <Project Path="tests/GlimHUD.Checks/GlimHUD.Checks.csproj" />
     <Project Path="tests/GlimHUD.MediaChecks/GlimHUD.MediaChecks.csproj" />
     <Project Path="tests/GlimHUD.AudioChecks/GlimHUD.AudioChecks.csproj" />
@@ -10,5 +11,15 @@
     <Project Path="tests/GlimHUD.OptionsChecks/GlimHUD.OptionsChecks.csproj" />
     <Project Path="tests/GlimHUD.TelemetryChecks/GlimHUD.TelemetryChecks.csproj" />
     <Project Path="tests/GlimHUD.LocalizationChecks/GlimHUD.LocalizationChecks.csproj" />
+    <Project Path="tests/GlimHUD.PerformanceChecks/GlimHUD.PerformanceChecks.csproj" />
+    <Project Path="tests/GlimHUD.RestartChecks/GlimHUD.RestartChecks.csproj" />
+    <Project Path="tests/GlimHUD.AlignmentChecks/GlimHUD.AlignmentChecks.csproj" />
+    <Project Path="tests/GlimHUD.StartupChecks/GlimHUD.StartupChecks.csproj" />
+    <Project Path="tests/GlimHUD.HotkeyChecks/GlimHUD.HotkeyChecks.csproj" />
+    <Project Path="tests/GlimHUD.AudioLevelChecks/GlimHUD.AudioLevelChecks.csproj" />
+    <Project Path="tests/GlimHUD.GlowChecks/GlimHUD.GlowChecks.csproj" />
+    <Project Path="tests/GlimHUD.GlowMotionChecks/GlimHUD.GlowMotionChecks.csproj" />
+    <Project Path="tests/GlimHUD.ProjectLinkChecks/GlimHUD.ProjectLinkChecks.csproj" />
+    <Project Path="tests/GlimHUD.MenuChecks/GlimHUD.MenuChecks.csproj" />
   </Folder>
 </Solution>

@@ -57,6 +57,25 @@ internal static class Program
                 "Light accent receives a readable dark checkmark.");
             theme.Apply(false, "bad input");
             Check(theme.CurrentColor == AccentThemeService.DefaultColor, "An invalid persisted custom color falls back safely.");
+            theme.ApplyOverlayColors("#000000", "#FFFFFF", .30);
+            Check(((SolidColorBrush)app.Resources["OverlayTextBrush"]).Color == Colors.Black,
+                "Black overlay text is applied without modifying the accent.");
+            Check(((SolidColorBrush)app.Resources["OverlayBackgroundBrush"]).Color == Color.FromArgb(76, 255, 255, 255),
+                "Background color keeps its independently selected transparency.");
+            Check(((SolidColorBrush)app.Resources["OverlayMutedTextBrush"]).Color == Color.FromArgb(210, 0, 0, 0),
+                "Secondary overlay text retains the exact selected RGB with subtle alpha.");
+            var overlayLabel = new TextBlock();
+            overlayLabel.SetResourceReference(TextBlock.ForegroundProperty, "OverlayTextBrush");
+            window.Content = overlayLabel;
+            theme.ApplyOverlayColors("#DF5544", "#102030", .65);
+            Check(((SolidColorBrush)overlayLabel.Foreground).Color == Color.FromRgb(223, 85, 68),
+                "An existing overlay text consumer updates immediately to any custom RGB.");
+            Check(theme.CurrentColor == AccentThemeService.DefaultColor,
+                "Custom overlay text and background do not overwrite the accent color.");
+            theme.ApplyOverlayColors("invalid", "invalid", double.NaN);
+            Check(((SolidColorBrush)app.Resources["OverlayTextBrush"]).Color == AccentThemeService.DefaultTextColor
+                  && ((SolidColorBrush)app.Resources["OverlayBackgroundBrush"]).Color == Color.FromArgb(76, 7, 18, 29),
+                "Malformed overlay colors and opacity fall back to the original palette.");
             var previous = theme.CurrentColor;
             theme.Dispose();
             theme.Apply(false, "#FF0000");

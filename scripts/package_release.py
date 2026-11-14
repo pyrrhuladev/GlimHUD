@@ -7,22 +7,23 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-SOURCE_DIRECTORIES = ("src", "tests", "scripts", "tools", "Notices", "docs", "packaging", ".github")
+SOURCE_DIRECTORIES = ("src", "tests", "scripts", "tools", "Notices", "docs", "packaging", "site", ".github")
 ROOT_FILES = (
-    "LICENSE", "README.md", "THIRD-PARTY-NOTICES.md", "CONTRIBUTING.md", "SECURITY.md",
+    "LICENSE", "README.md", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md", "CONTRIBUTING.md", "SECURITY.md",
     "GlimHUD.slnx", "global.json", ".gitignore", ".editorconfig",
 )
 REQUIRED_NOTICES = (
     "Notices/LibreHardwareMonitor.txt", "Notices/NAudio.txt", "Notices/HidSharp.txt",
     "Notices/BlackSharp.Core.txt", "Notices/DiskInfoToolkit.txt", "Notices/RAMSPDToolkit-NDD.txt",
     "Notices/Mono.Posix.NETStandard.txt", "Notices/Microsoft.NET.txt", "Notices/Microsoft.NET-ThirdParty.txt",
+    "Notices/NetSparkle.txt", "Notices/NetSparkle.Chaos.NaCl.txt",
 )
 EXCLUDED_DIRECTORIES = {
     "bin", "obj", ".git", ".codex", ".tools", ".packages", "__pycache__", ".vs",
     "artifacts", "node_modules", "nvidia corporation",
 }
 EXCLUDED_EXTENSIONS = {
-    ".pdb", ".pyc", ".pyo", ".log", ".dmp", ".pfx", ".p12", ".key", ".cer", ".crt",
+    ".pdb", ".pyc", ".pyo", ".log", ".dmp", ".pfx", ".p12", ".key", ".priv", ".cer", ".crt",
     ".pem", ".msix", ".msixbundle", ".msixupload", ".user", ".suo", ".tmp", ".download",
 }
 
@@ -32,6 +33,8 @@ def allowed(relative_path: Path) -> bool:
     if EXCLUDED_DIRECTORIES.intersection(part.casefold() for part in relative_path.parts):
         return False
     name = relative_path.name.casefold()
+    if name in {"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}:
+        return False
     if name == ".env" or (name.startswith(".env.") and name != ".env.example"):
         return False
     return relative_path.suffix.casefold() not in EXCLUDED_EXTENSIONS

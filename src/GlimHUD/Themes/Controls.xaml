@@ -31,7 +31,7 @@
     </Style>
     <Style x:Key="CyanSlider" TargetType="Slider">
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
-        <Setter Property="Background" Value="#435C6A"/>
+        <Setter Property="Background" Value="#323946"/>
         <Setter Property="MinHeight" Value="24"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
@@ -57,7 +57,7 @@
     </Style>
 
     <Style x:Key="DarkCheckBox" TargetType="CheckBox">
-        <Setter Property="Foreground" Value="#DFEAF0"/>
+        <Setter Property="Foreground" Value="#DDE1E8"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="MinHeight" Value="20"/>
@@ -66,7 +66,7 @@
                 <ControlTemplate TargetType="CheckBox">
                     <BulletDecorator x:Name="Root" Background="Transparent">
                         <BulletDecorator.Bullet>
-                            <Border x:Name="Box" Width="16" Height="16" CornerRadius="4" Background="#0D1922" BorderBrush="#45606E" BorderThickness="1" VerticalAlignment="Center">
+                            <Border x:Name="Box" Width="17" Height="17" CornerRadius="5" Background="#090D13" BorderBrush="#414A5B" BorderThickness="1" VerticalAlignment="Center">
                                 <Path x:Name="Check" Data="M 3,7 L 6,10 11,4" Stroke="{DynamicResource AccentOnBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Visibility="Collapsed"/>
                             </Border>
                         </BulletDecorator.Bullet>
@@ -84,13 +84,13 @@
     </Style>
 
     <Style x:Key="DarkScrollThumb" TargetType="Thumb">
-        <Setter Property="Background" Value="#3C5665"/>
+        <Setter Property="Background" Value="#3C4554"/>
         <Setter Property="MinHeight" Value="24"/>
         <Setter Property="Template">
             <Setter.Value><ControlTemplate TargetType="Thumb">
                 <Border x:Name="Grip" Background="{TemplateBinding Background}" CornerRadius="3" Margin="3,2"/>
                 <ControlTemplate.Triggers>
-                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Grip" Property="Background" Value="#638899"/></Trigger>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Grip" Property="Background" Value="#68768D"/></Trigger>
                     <Trigger Property="IsDragging" Value="True"><Setter TargetName="Grip" Property="Background" Value="{DynamicResource AccentBrush}"/></Trigger>
                 </ControlTemplate.Triggers>
             </ControlTemplate></Setter.Value>

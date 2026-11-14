@@ -1,4 +1,6 @@
 using GlimHUD.Services;
+using GlimHUD.Localization;
+using LibreHardwareMonitor.Hardware;
 
 namespace GlimHUD.TelemetryChecks;
 
@@ -8,6 +10,8 @@ public static class Program
     {
         try
         {
+            CheckGpuMetricSelection();
+            CheckLocalizedCpuSource();
             await CheckWindowsOnlyFallback();
             await CheckHardwareSampling();
             await CheckLifetime();
@@ -21,6 +25,22 @@ public static class Program
         }
     }
 
+    private static void CheckLocalizedCpuSource()
+    {
+        var busy = new TelemetrySnapshot(null, null, null, null, null, null, null, null, null, "");
+        var utility = busy with { CpuLoadUsesUtility = true };
+        L10n.SetLanguage("en");
+        Check(busy.CpuLoadSource == "Windows CPU busy time" && utility.CpuLoadSource == "Windows Processor Utility",
+            "CPU diagnostic source names must remain precise in English.");
+        L10n.SetLanguage("ru");
+        Check(busy.CpuLoadSource.Contains("занятости", StringComparison.Ordinal)
+            && utility.CpuLoadSource.Contains("частоты", StringComparison.Ordinal),
+            "Existing telemetry snapshots must localize source labels without another hardware read.");
+        L10n.SetLanguage("en");
+        Check(busy.CpuLoadSource == "Windows CPU busy time" && utility.CpuLoadUsesUtility,
+            "Changing the language must preserve the selected CPU metric.");
+    }
+
     private static async Task CheckWindowsOnlyFallback()
     {
         using var service = new TelemetryService(enableHardwareSensors: false);
@@ -30,7 +50,7 @@ public static class Program
         var sample = await Sample(service);
         CheckMemory(sample);
         Check(sample.CpuLoadPercent is not null, "Windows CPU counter did not produce a second-sample load.");
-        CheckPercent(sample.CpuLoadPercent, "Windows CPU load");
+        CheckCpuLoad(sample.CpuLoadPercent);
         Check(sample.CpuTemperatureCelsius is null && sample.GpuLoadPercent is null &&
               sample.GpuTemperatureCelsius is null && sample.AvailableGpus.Count == 0,
             "Windows-only fallback must not invent hardware measurements.");
@@ -46,7 +66,7 @@ public static class Program
         await Task.Delay(400);
         var sample = await Sample(service);
         CheckMemory(sample);
-        CheckPercent(sample.CpuLoadPercent, "CPU load");
+        CheckCpuLoad(sample.CpuLoadPercent);
         CheckTemperature(sample.CpuTemperatureCelsius, "CPU temperature");
         CheckPercent(sample.GpuLoadPercent, "GPU load");
         CheckTemperature(sample.GpuTemperatureCelsius, "GPU temperature");
@@ -120,6 +140,36 @@ public static class Program
     private static void CheckPercent(double? value, string name) =>
         Check(value is null || double.IsFinite(value.Value) && value is >= 0 and <= 100,
             $"{name} is not a finite percentage: {value}.");
+
+    private static void CheckCpuLoad(double? value) =>
+        Check(value is null || double.IsFinite(value.Value) && value >= 0,
+            "CPU utility must be finite and nonnegative; boost can legitimately exceed 100%.");
+
+    private static void CheckGpuMetricSelection()
+    {
+        Check(TelemetryLoadRules.SelectGpuLoad([
+            ("GPU Core", SensorType.Load, 45f), ("D3D 3D", SensorType.Load, 82f),
+            ("GPU Memory Controller", SensorType.Load, 98f), ("GPU Power", SensorType.Load, 99f)]) == 82,
+            "The busiest engine must not be hidden by a lower core reading or confused with memory/power.");
+        Check(TelemetryLoadRules.SelectGpuLoad([
+            ("GPU Core", SensorType.Load, 89f), ("GPU D3D Copy", SensorType.Load, 31f)]) == 89,
+            "Higher vendor core readings must remain available.");
+        Check(TelemetryLoadRules.SelectGpuLoad([
+            ("D3D Video Decode", SensorType.Load, 77f), ("GPU Core", SensorType.Load, 24f)]) == 77,
+            "Busiest non-3D engines are valid GPU work.");
+        Check(TelemetryLoadRules.SelectGpuLoad([
+            ("GPU Core", SensorType.Load, float.NaN), ("D3D 3D", SensorType.Load, -1f)]) is null,
+            "Invalid measurements must not turn into zero load.");
+        Check(TelemetryLoadRules.SelectGpuLoad([("GPU Core", SensorType.Load, 0f)]) == 0,
+            "A real idle reading remains zero.");
+        var native = new WindowsGpuReading("dxgi/example", "0:1", "Example GPU", 0x10DE, 1, false, 81);
+        Check(TelemetryLoadRules.UniqueNativeLoad("Example GPU", ["Example GPU"], [native]) == 81,
+            "A unique native adapter can supplement its matching hardware sensor.");
+        Check(TelemetryLoadRules.UniqueNativeLoad("Example GPU", ["Example GPU", "Example GPU"], [native]) is null,
+            "One native adapter must not be copied to two same-model hardware cards.");
+        Check(TelemetryLoadRules.UniqueNativeLoad("Example GPU", ["Example GPU"], [native, native with { Luid = "0:2" }]) is null,
+            "Two same-model native cards must not be merged into one hardware card.");
+    }
 
     private static void CheckTemperature(double? value, string name) =>
         Check(value is null || double.IsFinite(value.Value) && value is > -20 and < 150,

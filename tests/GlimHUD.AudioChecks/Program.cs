@@ -111,7 +111,9 @@ using (var service = new AudioSessionService())
 {
     var missing = "GlimHUD.AudioChecks.Missing." + Guid.NewGuid().ToString("N");
     Check(!await service.SetVolumeAsync(.3f, source, missing), "Missing explicit session never falls back to the music application.");
+    Check(!await service.ToggleMutedAsync(source, missing), "Mute toggle rejects a missing explicit session without a fallback.");
     Check(!await service.SetMutedAsync(true, source, "GlimHUD.AudioGroup.v1:invalid"), "Malformed group target is rejected without a mutation.");
+    Check(!await service.ToggleMutedAsync(source, "GlimHUD.AudioGroup.v1:invalid"), "Mute toggle rejects a malformed group without a mutation.");
     Check(!await service.SetVolumeAsync(float.NaN, source), "Non-finite volume is rejected.");
 }
 Console.WriteLine($"{passed} checks passed.");
@@ -177,6 +179,19 @@ static class SilentFixtureCheck
             var unmuted = await service.SetMutedAsync(false, null, initial.Id);
             var afterUnmute = await service.GetSnapshotAsync(null, initial.Id);
             if (!unmuted || afterUnmute.IsMuted) throw new InvalidOperationException("Own silent fixture unmute did not round-trip.");
+            var toggledMute = await service.ToggleMutedAsync(null, initial.Id);
+            var afterToggleMute = await service.GetSnapshotAsync(null, initial.Id);
+            if (!toggledMute || !afterToggleMute.IsMuted)
+                throw new InvalidOperationException("Own silent fixture fresh mute toggle did not mute.");
+            var toggledUnmute = await service.ToggleMutedAsync(null, initial.Id);
+            var afterToggleUnmute = await service.GetSnapshotAsync(null, initial.Id);
+            if (!toggledUnmute || afterToggleUnmute.IsMuted)
+                throw new InvalidOperationException("Own silent fixture fresh mute toggle did not unmute.");
+            var rapidToggles = await Task.WhenAll(
+                service.ToggleMutedAsync(null, initial.Id), service.ToggleMutedAsync(null, initial.Id));
+            var afterRapidToggles = await service.GetSnapshotAsync(null, initial.Id);
+            if (rapidToggles.Any(success => !success) || afterRapidToggles.IsMuted)
+                throw new InvalidOperationException("Two serialized toggles did not restore the own fixture's state.");
             await File.WriteAllTextAsync(absoluteOutput, JsonSerializer.Serialize(new
             {
                 Success = true,
@@ -185,6 +200,9 @@ static class SilentFixtureCheck
                 VolumeSet = afterVolume.Volume,
                 Muted = afterMute.IsMuted,
                 Unmuted = !afterUnmute.IsMuted,
+                FreshMuteToggle = afterToggleMute.IsMuted,
+                FreshUnmuteToggle = !afterToggleUnmute.IsMuted,
+                RapidTogglesRestoredState = !afterRapidToggles.IsMuted,
                 UserApplicationsMutated = false,
                 OutputAmplitude = 0
             }, new JsonSerializerOptions { WriteIndented = true }));

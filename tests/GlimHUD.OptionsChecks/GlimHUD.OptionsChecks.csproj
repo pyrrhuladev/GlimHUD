@@ -9,5 +9,6 @@
     <Compile Include="../../src/GlimHUD/Services/OverlayVisibilityPolicy.cs" Link="OverlayVisibilityPolicy.cs" />
     <Compile Include="../../src/GlimHUD/Services/SettingsStore.cs" Link="SettingsStore.cs" />
     <Compile Include="../../src/GlimHUD/Models/AppSettings.cs" Link="AppSettings.cs" />
+    <Compile Include="../../src/GlimHUD/Models/GlowStyles.cs" Link="GlowStyles.cs" />
   </ItemGroup>
 </Project>

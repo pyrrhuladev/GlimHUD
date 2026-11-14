@@ -1,0 +1,98 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+      - 'src/GlimHUD/Assets/update-public-key.txt'
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      DOTNET_ROLL_FORWARD: LatestMajor
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Assemble website with latest published signed feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          New-Item -ItemType Directory -Path ./artifacts/pages -Force | Out-Null
+          Copy-Item -Path ./site/* -Destination ./artifacts/pages -Recurse
+          $releaseJson = gh api "repos/$env:GH_REPO/releases/latest"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the latest published release; the current site is preserved.' }
+          $release = $releaseJson | ConvertFrom-Json
+          $publishedVersion = $release.tag_name -creplace '^v', ''
+          if ($publishedVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'The latest public release does not have a stable version.' }
+          $feedNames = @('appcast.xml', 'appcast.xml.signature')
+          $available = @($release.assets | Where-Object { $_.name -in $feedNames })
+          foreach ($required in @("GlimHUD-$publishedVersion-Setup-x64.exe", 'GlimHUD-Setup-x64.exe', 'GlimHUD-win-x64.zip')) {
+            if ($required -notin @($release.assets.name)) { throw 'The latest release has incomplete downloads; the existing site is preserved until a complete release is public.' }
+          }
+          if ($available.Count -ne 2) {
+            throw 'The latest release is missing signed update metadata; the current site is preserved.'
+          } else {
+            $feedDirectory = './artifacts/pages/updates/stable'
+            New-Item -ItemType Directory -Path $feedDirectory -Force | Out-Null
+            foreach ($name in $feedNames) {
+              gh release download $release.tag_name --pattern $name --dir $feedDirectory
+              if ($LASTEXITCODE -ne 0) { throw "Could not download published metadata: $name" }
+            }
+            dotnet tool install NetSparkleUpdater.Tools.AppCastGenerator --version 2.9.0 --tool-path .tools/netsparkle-appcast
+            if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the metadata verifier.' }
+            $env:SPARKLE_PUBLIC_KEY = (Get-Content -LiteralPath ./src/GlimHUD/Assets/update-public-key.txt -Raw).Trim()
+            # CLI 2.9.0 demands a private-key slot even for public verification.
+            # This non-secret placeholder cannot sign for the pinned public key.
+            $env:SPARKLE_PRIVATE_KEY = [Convert]::ToBase64String([byte[]]::new(32))
+            $signature = (Get-Content -LiteralPath "$feedDirectory/appcast.xml.signature" -Raw).Trim()
+            $verification = @(& ./.tools/netsparkle-appcast/netsparkle-generate-appcast --verify "$feedDirectory/appcast.xml" --signature $signature 2>&1)
+            if ($LASTEXITCODE -ne 0 -or ($verification -join "`n").Trim() -cne 'Signature valid') { throw 'Published appcast signature is invalid.' }
+            [xml]$feed = Get-Content -LiteralPath "$feedDirectory/appcast.xml" -Raw
+            $enclosure = $feed.rss.channel.item.enclosure
+            $expectedName = "GlimHUD-$($release.tag_name.TrimStart('v'))-Setup-x64.exe"
+            $expectedUrl = "https://github.com/$env:GH_REPO/releases/download/$($release.tag_name)/$expectedName"
+            if ($enclosure.url -cne $expectedUrl -or $expectedName -notin @($release.assets.name)) { throw 'The signed feed does not point to this published release installer.' }
+          }
+          $manifest = @{ version = $publishedVersion } | ConvertTo-Json
+          [IO.File]::WriteAllText((Join-Path (Get-Location) 'artifacts/pages/release.json'), $manifest, [Text.UTF8Encoding]::new($false))
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: artifacts/pages
+      - name: Deploy website and stable feed
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
