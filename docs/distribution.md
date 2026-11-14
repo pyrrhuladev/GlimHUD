@@ -31,7 +31,7 @@ gh auth login
 .\scripts\Enable-Publishing.ps1 -StartRelease
 ```
 
-The helper checks repository administration, existing local keys, and the public key and version on remote `main` before changing anything. It uploads the private seed through stdin into the Actions secret, enables Pages with GitHub Actions as its source, and starts the Release workflow. It never generates a new key or prints the private seed. `-WhatIf` performs the read-only checks and previews changes; omit `-StartRelease` to configure publishing without starting a release. A successful Release deploys the website and feed automatically. The following steps describe the equivalent manual setup.
+The helper checks repository administration, existing local keys, and the public key and version on remote `main` before changing anything. It uploads the private seed through UTF-8 stdin without a byte-order mark, enables Pages with GitHub Actions as its source, and starts the Release workflow. This works in Windows PowerShell 5.1 and PowerShell 7, preserves the caller's output encoding, and handles an expected Pages 404 without treating other CLI failures as success. It never generates a new key or prints the private seed. `-WhatIf` performs the read-only checks and previews changes; omit `-StartRelease` to configure publishing without starting a release. A successful Release deploys the website and feed automatically. The following steps describe the equivalent manual setup.
 
 1. In repository **Settings → Pages → Build and deployment**, choose **GitHub Actions** as the source. This requires repository administration access. The workflow's `GITHUB_TOKEN` cannot perform this initial enablement.
 2. Generate an update key pair once with the pinned official NetSparkle tool. Keep the private seed in a password manager or other encrypted offline backup. Do not generate a different key for each release.
@@ -70,7 +70,7 @@ Update the project version and changelog, run the normal solution checks, and pu
 gh workflow run release.yml --repo pyrrhuladev/GlimHUD --ref main -f version=0.7.0
 ```
 
-Pushing a tag that exactly matches the project version, such as `v0.7.0`, also starts the release workflow. A manual run creates that tag at the exact source commit used by its build. Existing published versions and tags pointing elsewhere cannot be overwritten; publish a higher version instead.
+Pushing a tag that exactly matches the project version, such as `v0.7.0`, also starts the release workflow. Alternatively, push reviewed source to a dedicated branch named `release/v0.7.0`. The branch name must exactly match the project version; an ordinary push to `main` does not publish a release. A branch-triggered or manual run creates the version tag at the exact source commit used by its build. Existing published versions and tags pointing elsewhere cannot be overwritten; publish a higher version instead.
 
 The Release workflow restores/builds/tests the solution, runs real signing and tamper-rejection checks with temporary keys, fetches verified PresentMon, publishes a self-contained app, and compiles the per-user installer with the verified Inno Setup compiler. It signs both the versioned installer and the feed, verifies both signatures, and creates checksums. Its publish job uploads all assets into a draft release before making that complete release public.
 

@@ -23,6 +23,10 @@ $privateKey = if ($KeyDirectory) {
     (Get-Content -LiteralPath (Join-Path $KeyDirectory 'NetSparkle_Ed25519.priv') -Raw).Trim()
 } else { $env:NETSPARKLE_PRIVATE_KEY }
 if ([string]::IsNullOrWhiteSpace($privateKey)) { throw 'NETSPARKLE_PRIVATE_KEY or KeyDirectory is required. Unsigned feeds are not published.' }
+$privateKey = $privateKey.Trim()
+# Older Windows PowerShell native stdin may have stored a UTF-8 BOM in Secrets.
+# Remove only that transport marker; the seed and pinned-key verification stay strict.
+if ($privateKey[0] -eq [char]0xFEFF) { $privateKey = $privateKey.Substring(1).Trim() }
 try { $privateBytes = [Convert]::FromBase64String($privateKey) } catch { throw 'The update signing key must be a base64 Ed25519 seed.' }
 if ($privateBytes.Length -ne 32) { throw 'The update signing key must contain a 32-byte Ed25519 seed.' }
 if (-not $AppCastToolPath) {

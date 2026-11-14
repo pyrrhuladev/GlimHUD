@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     tags: ['v*']
+    branches: ['release/v*']
   workflow_dispatch:
     inputs:
       version:
@@ -47,7 +48,10 @@ jobs:
           [xml] $project = Get-Content .\src\GlimHUD\GlimHUD.csproj
           $version = [string] $project.Project.PropertyGroup.Version
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'The project version must be stable and have three numeric components.' }
-          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF_NAME -cne "v$version") { throw 'The tag must exactly match the stable project version.' }
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            $expectedRef = if ($env:GITHUB_REF.StartsWith('refs/tags/')) { "v$version" } else { "release/v$version" }
+            if ($env:GITHUB_REF_NAME -cne $expectedRef) { throw 'The release tag or branch must exactly match the stable project version.' }
+          }
           if ($env:REQUESTED_VERSION -and $env:REQUESTED_VERSION -cne $version) { throw 'The requested version must exactly match the project version.' }
           if ([string]::IsNullOrWhiteSpace($env:NETSPARKLE_PRIVATE_KEY)) { throw 'Configure the NETSPARKLE_PRIVATE_KEY Actions secret before publishing.' }
           if (-not (Test-Path -LiteralPath .\src\GlimHUD\Assets\update-public-key.txt)) { throw 'The pinned update public key is missing.' }

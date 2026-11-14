@@ -21,7 +21,10 @@ args = sys.argv[1:]
 record = {"args": args}
 mode = os.environ["GLIMHUD_SETUP_FIXTURE_MODE"]
 if args[:2] == ["secret", "set"]:
-    record["stdin_matched"] = sys.stdin.read().strip() == base64.b64encode(bytes(32)).decode()
+    stdin_bytes = sys.stdin.buffer.read()
+    record["stdin_matched"] = stdin_bytes.decode("utf-8", errors="replace").strip() == base64.b64encode(bytes(32)).decode()
+    record["stdin_bom"] = stdin_bytes.startswith((b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff"))
+    record["stdin_length"] = len(stdin_bytes)
 with open(os.environ["GLIMHUD_SETUP_FIXTURE_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps(record) + "\n")
 if args == ["api", "user"]:
@@ -89,15 +92,28 @@ class PublishingSetupChecks(unittest.TestCase):
 
     def run_helper(self, mode: str, *, what_if: bool = False) -> tuple[subprocess.CompletedProcess[str], list[dict]]:
         self.environment["GLIMHUD_SETUP_FIXTURE_MODE"] = mode
+        def ps_string(value: str | Path) -> str:
+            return "'" + str(value).replace("'", "''") + "'"
+
+        # Reproduce hosted WinPS5's UTF-8 BOM setting. The helper must use no-BOM
+        # stdin for secrets while restoring the caller's original encoding object.
+        invoke = (f"& {ps_string(ROOT / 'scripts/Enable-Publishing.ps1')} "
+                  f"-GitHubCliPath {ps_string(self.launcher)} -KeyDirectory {ps_string(self.keys)} "
+                  "-StartRelease" + (" -WhatIf" if what_if else ""))
+        wrapper = ("$OutputEncoding = [Text.UTF8Encoding]::new($true); "
+                   "$originalEncoding = $OutputEncoding; $fixtureExit = 0; "
+                   f"try {{ {invoke} }} "
+                   "catch { [Console]::Error.WriteLine($_.ToString()); $fixtureExit = 1 } "
+                   "finally { if (-not [object]::ReferenceEquals($originalEncoding, $OutputEncoding)) { "
+                   "[Console]::Error.WriteLine('CALLER_OUTPUT_ENCODING_CHANGED'); $fixtureExit = 2 } }; "
+                   "exit $fixtureExit")
         # Limit execution-policy relaxation to this isolated fixture subprocess.
-        command = [self.shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "scripts/Enable-Publishing.ps1"),
-                   "-GitHubCliPath", str(self.launcher), "-KeyDirectory", str(self.keys), "-StartRelease"]
-        if what_if:
-            command.append("-WhatIf")
+        command = [self.shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", wrapper]
         result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
                                 env=self.environment, timeout=30, check=False)
         calls = [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
         self.assertNotIn(base64.b64encode(bytes(32)).decode(), result.stdout + result.stderr + json.dumps(calls))
+        self.assertNotIn("CALLER_OUTPUT_ENCODING_CHANGED", result.stdout + result.stderr)
         return result, calls
 
     @staticmethod
@@ -111,6 +127,8 @@ class PublishingSetupChecks(unittest.TestCase):
         self.assertEqual(len(mutations), 3)
         self.assertEqual(mutations[0]["args"][:2], ["secret", "set"])
         self.assertTrue(mutations[0]["stdin_matched"])
+        self.assertFalse(mutations[0]["stdin_bom"])
+        self.assertIn(mutations[0]["stdin_length"], (44, 45, 46))
         self.assertIn("POST", mutations[1]["args"])
         self.assertEqual(mutations[2]["args"][:3], ["workflow", "run", "release.yml"])
 
@@ -144,6 +162,7 @@ class PublishingSetupChecks(unittest.TestCase):
                 self.assertEqual(len(mutations), expected_count)
                 self.assertEqual(mutations[0]["args"][:2], ["secret", "set"])
                 self.assertTrue(mutations[0]["stdin_matched"])
+                self.assertFalse(mutations[0]["stdin_bom"])
                 if expected_count > 1:
                     self.assertIn("POST", mutations[1]["args"])
                 if expected_count > 2:

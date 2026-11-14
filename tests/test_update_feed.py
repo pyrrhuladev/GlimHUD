@@ -29,6 +29,7 @@ class UpdateFeedChecks(unittest.TestCase):
             cls.environment.pop(key, None)
 
     def setUp(self) -> None:
+        self.environment = self.environment.copy()
         temporary = tempfile.TemporaryDirectory(prefix="GlimHUD-update-feed-")
         self.addCleanup(temporary.cleanup)
         self.folder = Path(temporary.name)
@@ -93,6 +94,24 @@ class UpdateFeedChecks(unittest.TestCase):
         result = self.publish(key_directory=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.output / "appcast.xml").exists())
+
+    def test_secret_stdin_transport_marker_preserves_the_same_signing_key(self) -> None:
+        seed = (self.keys / "NetSparkle_Ed25519.priv").read_text(encoding="utf-8").strip()
+        for index, (prefix, accepted) in enumerate((("", True), ("\ufeff", True),
+                                                    ("\ufeff\ufeff", False), ("invalid:", False))):
+            with self.subTest(prefix_codepoints=[ord(char) for char in prefix]):
+                self.output = self.folder / f"environment-secret-{index}"
+                self.environment["NETSPARKLE_PRIVATE_KEY"] = prefix + seed + "\r\n"
+                result = self.publish(key_directory=False)
+                self.assertNotIn(seed, result.stdout + result.stderr)
+                if accepted:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    feed = self.output / "appcast.xml"
+                    signature = (self.output / "appcast.xml.signature").read_text(encoding="utf-8")
+                    self.assertTrue(self.verifies(feed, signature))
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse((self.output / "appcast.xml").exists())
 
     def test_existing_metadata_cannot_be_replaced(self) -> None:
         result = self.publish()

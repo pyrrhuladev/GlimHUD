@@ -37,8 +37,12 @@ function Invoke-GitHubCommand {
     # Windows PowerShell 5.1 turns redirected native stderr into ErrorRecords.
     # Capture it without terminating before the CLI exit code can be inspected.
     $previousErrorAction = $ErrorActionPreference
+    $previousOutputEncoding = $OutputEncoding
     try {
         $ErrorActionPreference = 'Continue'
+        # Some Windows PowerShell hosts use UTF-8 with a BOM for native stdin.
+        # The signing seed is plain base64; do not prefix it with encoding bytes.
+        $OutputEncoding = [Text.UTF8Encoding]::new($false)
         if ($PSBoundParameters.ContainsKey('InputText')) {
             $response = @($InputText | & $gh @Arguments 2>&1)
         } else {
@@ -50,6 +54,7 @@ function Invoke-GitHubCommand {
             Output = @($response | ForEach-Object { $_.ToString() })
         }
     } finally {
+        $OutputEncoding = $previousOutputEncoding
         $ErrorActionPreference = $previousErrorAction
     }
 }
