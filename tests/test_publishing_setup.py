@@ -23,8 +23,16 @@ mode = os.environ["GLIMHUD_SETUP_FIXTURE_MODE"]
 if args[:2] == ["secret", "set"]:
     stdin_bytes = sys.stdin.buffer.read()
     record["stdin_matched"] = stdin_bytes.decode("utf-8", errors="replace").strip() == base64.b64encode(bytes(32)).decode()
-    record["stdin_bom"] = stdin_bytes.startswith((b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff"))
+    boms = ((b"\xff\xfe\x00\x00", "utf32-le"), (b"\x00\x00\xfe\xff", "utf32-be"),
+            (b"\xef\xbb\xbf", "utf8"), (b"\xff\xfe", "utf16-le"), (b"\xfe\xff", "utf16-be"))
+    record["stdin_bom_kind"] = next((name for prefix, name in boms if stdin_bytes.startswith(prefix)), "none")
+    record["stdin_bom"] = record["stdin_bom_kind"] != "none"
     record["stdin_length"] = len(stdin_bytes)
+    record["stdin_starts_newline"] = stdin_bytes.startswith((b"\r", b"\n"))
+    record["stdin_ends_newline"] = stdin_bytes.endswith((b"\r", b"\n"))
+    record["stdin_prefix_category"] = ("empty" if not stdin_bytes else
+        "utf16-like" if b"\x00" in stdin_bytes[:4] else
+        "ascii" if all(byte < 128 for byte in stdin_bytes[:4]) else "non-ascii")
 with open(os.environ["GLIMHUD_SETUP_FIXTURE_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps(record) + "\n")
 if args == ["api", "user"]:
@@ -95,17 +103,27 @@ class PublishingSetupChecks(unittest.TestCase):
         def ps_string(value: str | Path) -> str:
             return "'" + str(value).replace("'", "''") + "'"
 
-        # Reproduce hosted WinPS5's UTF-8 BOM setting. The helper must use no-BOM
-        # stdin for secrets while restoring the caller's original encoding object.
+        # WinPS5's Process.Start can write Console.InputEncoding's BOM before a
+        # BaseStream write. Force both settings and require the caller's encoding
+        # properties to survive; Console encoding getters can return clones.
         invoke = (f"& {ps_string(ROOT / 'scripts/Enable-Publishing.ps1')} "
                   f"-GitHubCliPath {ps_string(self.launcher)} -KeyDirectory {ps_string(self.keys)} "
                   "-StartRelease" + (" -WhatIf" if what_if else ""))
         wrapper = ("$OutputEncoding = [Text.UTF8Encoding]::new($true); "
-                   "$originalEncoding = $OutputEncoding; $fixtureExit = 0; "
+                   "[Console]::InputEncoding = [Text.UTF8Encoding]::new($true); "
+                   "$originalOutputCodePage = $OutputEncoding.CodePage; "
+                   "$originalOutputPreamble = [Convert]::ToBase64String($OutputEncoding.GetPreamble()); "
+                   "$originalInputCodePage = [Console]::InputEncoding.CodePage; "
+                   "$originalInputPreamble = [Convert]::ToBase64String([Console]::InputEncoding.GetPreamble()); "
+                   "$fixtureExit = 0; "
                    f"try {{ {invoke} }} "
                    "catch { [Console]::Error.WriteLine($_.ToString()); $fixtureExit = 1 } "
-                   "finally { if (-not [object]::ReferenceEquals($originalEncoding, $OutputEncoding)) { "
-                   "[Console]::Error.WriteLine('CALLER_OUTPUT_ENCODING_CHANGED'); $fixtureExit = 2 } }; "
+                   "finally { if ($OutputEncoding.CodePage -ne $originalOutputCodePage -or "
+                   "[Convert]::ToBase64String($OutputEncoding.GetPreamble()) -cne $originalOutputPreamble) { "
+                   "[Console]::Error.WriteLine('CALLER_OUTPUT_ENCODING_CHANGED'); $fixtureExit = 2 }; "
+                   "if ([Console]::InputEncoding.CodePage -ne $originalInputCodePage -or "
+                   "[Convert]::ToBase64String([Console]::InputEncoding.GetPreamble()) -cne $originalInputPreamble) { "
+                   "[Console]::Error.WriteLine('CALLER_INPUT_ENCODING_CHANGED'); $fixtureExit = 2 } }; "
                    "exit $fixtureExit")
         # Limit execution-policy relaxation to this isolated fixture subprocess.
         command = [self.shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", wrapper]
@@ -114,11 +132,17 @@ class PublishingSetupChecks(unittest.TestCase):
         calls = [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
         self.assertNotIn(base64.b64encode(bytes(32)).decode(), result.stdout + result.stderr + json.dumps(calls))
         self.assertNotIn("CALLER_OUTPUT_ENCODING_CHANGED", result.stdout + result.stderr)
+        self.assertNotIn("CALLER_INPUT_ENCODING_CHANGED", result.stdout + result.stderr)
         return result, calls
 
     @staticmethod
     def mutations(calls: list[dict]) -> list[dict]:
         return [call for call in calls if call["args"][0] != "api" or "--method" in call["args"]]
+
+    @staticmethod
+    def stdin_details(call: dict) -> dict:
+        """Diagnostics contain only flags and length, never payload bytes or text."""
+        return {key: value for key, value in call.items() if key.startswith("stdin_") and key != "stdin_matched"}
 
     def test_new_pages_secret_stdin_and_release_dispatch(self) -> None:
         result, calls = self.run_helper("new-pages")
@@ -126,9 +150,10 @@ class PublishingSetupChecks(unittest.TestCase):
         mutations = self.mutations(calls)
         self.assertEqual(len(mutations), 3)
         self.assertEqual(mutations[0]["args"][:2], ["secret", "set"])
-        self.assertTrue(mutations[0]["stdin_matched"])
-        self.assertFalse(mutations[0]["stdin_bom"])
-        self.assertIn(mutations[0]["stdin_length"], (44, 45, 46))
+        details = self.stdin_details(mutations[0])
+        self.assertTrue(mutations[0]["stdin_matched"], details)
+        self.assertFalse(mutations[0]["stdin_bom"], details)
+        self.assertIn(mutations[0]["stdin_length"], (44, 45, 46), details)
         self.assertIn("POST", mutations[1]["args"])
         self.assertEqual(mutations[2]["args"][:3], ["workflow", "run", "release.yml"])
 
@@ -161,8 +186,9 @@ class PublishingSetupChecks(unittest.TestCase):
                 mutations = self.mutations(calls)
                 self.assertEqual(len(mutations), expected_count)
                 self.assertEqual(mutations[0]["args"][:2], ["secret", "set"])
-                self.assertTrue(mutations[0]["stdin_matched"])
-                self.assertFalse(mutations[0]["stdin_bom"])
+                details = self.stdin_details(mutations[0])
+                self.assertTrue(mutations[0]["stdin_matched"], details)
+                self.assertFalse(mutations[0]["stdin_bom"], details)
                 if expected_count > 1:
                     self.assertIn("POST", mutations[1]["args"])
                 if expected_count > 2:

@@ -44,7 +44,63 @@ function Invoke-GitHubCommand {
         # The signing seed is plain base64; do not prefix it with encoding bytes.
         $OutputEncoding = [Text.UTF8Encoding]::new($false)
         if ($PSBoundParameters.ContainsKey('InputText')) {
-            $response = @($InputText | & $gh @Arguments 2>&1)
+            # Write bytes directly: legacy PowerShell hosts can transform native
+            # pipeline stdin even when OutputEncoding is explicitly selected.
+            $quotedArguments = @($Arguments | ForEach-Object {
+                '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+            }) -join ' '
+            $start = [Diagnostics.ProcessStartInfo]::new()
+            $start.FileName = $gh
+            $start.Arguments = $quotedArguments
+            if ([IO.Path]::GetExtension($gh) -in '.cmd', '.bat') {
+                # Isolated tests use a local CLI shim; production uses gh.exe.
+                $start.FileName = $env:ComSpec
+                $start.Arguments = '/d /s /c ""' + $gh + '" ' + $quotedArguments + '"'
+            }
+            $start.UseShellExecute = $false
+            $start.CreateNoWindow = $true
+            $start.RedirectStandardInput = $true
+            $start.RedirectStandardOutput = $true
+            $start.RedirectStandardError = $true
+            $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+            $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
+            $hasInputEncoding = $null -ne $start.PSObject.Properties['StandardInputEncoding']
+            if ($hasInputEncoding) { $start.StandardInputEncoding = [Text.UTF8Encoding]::new($false) }
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $start
+            $inputBytes = [Text.Encoding]::UTF8.GetBytes($InputText)
+            try {
+                # .NET Framework has no per-process StandardInputEncoding. Its
+                # StreamWriter emits Console.InputEncoding's BOM during Start,
+                # before any BaseStream write. Restore the caller immediately.
+                $previousConsoleInput = $null
+                try {
+                    if (-not $hasInputEncoding) {
+                        $previousConsoleInput = [Console]::InputEncoding
+                        [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+                    }
+                    if (-not $process.Start()) { throw 'GitHub CLI could not start.' }
+                } finally {
+                    if ($null -ne $previousConsoleInput) { [Console]::InputEncoding = $previousConsoleInput }
+                }
+                $stdout = $process.StandardOutput.ReadToEndAsync()
+                $stderr = $process.StandardError.ReadToEndAsync()
+                $process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)
+                $process.StandardInput.BaseStream.Flush()
+                $process.StandardInput.Close()
+                if (-not $process.WaitForExit(60000)) {
+                    $process.Kill()
+                    throw 'GitHub CLI timed out while storing the signing secret.'
+                }
+                return [pscustomobject]@{
+                    ExitCode = $process.ExitCode
+                    Output = @($stdout.GetAwaiter().GetResult(), $stderr.GetAwaiter().GetResult())
+                }
+            } finally {
+                [Array]::Clear($inputBytes, 0, $inputBytes.Length)
+                $InputText = $null
+                $process.Dispose()
+            }
         } else {
             $response = @(& $gh @Arguments 2>&1)
         }
