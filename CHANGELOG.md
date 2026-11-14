@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.1 - 2026-11-14
+
+### Fixed
+
+- Reduced glow rendering work and repeated allocations by caching the capsule's pixel map and reusing a bitmap buffer instead of rebuilding vector strips and opacity masks each frame.
+- Each glow surface now submits one image, with a bounded raster resolution for large panels and high-DPI displays. Panel text and controls keep their normal WPF rendering.
+
+### Changed
+
+- Preserved the 30 Hz animation cadence, Rainbow Wave and Neon Flow styles, inner/outer glow, music-driven highlights, and Neon Flow's white core.
+- Added an optional reproducible glow benchmark and [performance notes](docs/glow-performance.md). Reported offscreen CPU/raster timings are not GPU-utilization measurements.
+
 ## 0.8.0 - 2026-11-14
 
 ### Added

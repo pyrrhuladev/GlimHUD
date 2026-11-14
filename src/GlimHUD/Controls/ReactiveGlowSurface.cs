@@ -1,29 +1,27 @@
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using GlimHUD.Models;
 
 namespace GlimHUD.Controls;
 
-public enum GlowLayer
-{
-    Outer,
-    Inner,
-    Both
-}
+public enum GlowLayer { Outer, Inner, Both }
 
 /// <summary>
-/// An RGB wave traveling by distance around the entire capsule perimeter. The
-/// outer layer belongs in the click-through companion; the clipped inner layer
-/// belongs underneath the panel background and content. It owns no animation.
+/// A cached capsule raster, animated with palette lookups. Each frame submits one
+/// image instead of thousands of vector strips and full-surface opacity masks.
+/// The companion owns the outer pixels; the inner image stays below HUD content.
 /// Allow 23 local DIPs around an outer layer so its halo is never clipped.
 /// </summary>
 public sealed class ReactiveGlowSurface : FrameworkElement
 {
     private const int PaletteSize = 768;
-    private static readonly Brush[] Rainbow = CreatePalette();
-    private static readonly Brush[] Neon = CreateNeonPalette();
-    private static readonly LinearGradientBrush[] WashPalette = CreateWashPalette(Rainbow);
-    private static readonly LinearGradientBrush[] NeonWashPalette = CreateWashPalette(Neon);
+    private const int InsideSteps = 1024;
+    private const int DepthSteps = 64;
+    private const double Padding = 23;
+    private const int MaximumPixels = 2_000_000;
+    private static readonly Color[] Rainbow = CreatePalette();
+    private static readonly Color[] Neon = CreateNeonPalette();
     private static readonly double[] BloomPositions = [0, .065, .14, .26, .43, .65, .84, 1];
     private static readonly double[] BloomAlpha = [.9, .83, .52, .28, .13, .045, .012, 0];
     private static readonly double[] InsidePositions = [0, .06, .14, .28, .48, .72, 1];
@@ -32,56 +30,47 @@ public sealed class ReactiveGlowSurface : FrameworkElement
     private static readonly double[] OuterAlpha = [1, .54, .36, .245, .16, .095, .05, .018];
     private static readonly double[] InnerFractions = [0, .055, .12, .22, .36, .53, .75, 1];
     private static readonly double[] InnerAlpha = [.95, .70, .50, .35, .23, .13, .035];
-    private Geometry[][]? _outerRings;
-    private Geometry[][]? _innerRings;
-    private Geometry? _outerClip;
-    private Geometry? _innerClip;
-    private Geometry[]? _outerStrips;
-    private Geometry[]? _innerStrips;
-    private Geometry[]? _outerCore;
-    private Geometry[]? _innerCore;
-    private MatrixTransform[]? _outerTransforms;
-    private MatrixTransform[]? _innerTransforms;
-    private DrawingBrush[]? _outerMasks;
-    private DrawingBrush? _innerMask;
-    private Size _geometrySize;
-    private Rect _capsule;
-    private double _radius;
-    private double _perimeter;
-    private int _segments;
+    private static readonly float[][] OuterMasks = CreateOuterMasks();
+    private static readonly float[] InnerMask = CreateInnerMask();
+    private static readonly float[] Comet = CreateComet();
+    private readonly FrameColor[] _colors = new FrameColor[PaletteSize];
+    private readonly FrameColor[] _wash = new FrameColor[PaletteSize + 1];
+    private readonly float[] _highlights = new float[PaletteSize];
+    private readonly float[] _outerCore = new float[PaletteSize];
+    private readonly float[] _innerCore = new float[PaletteSize];
+    private WriteableBitmap? _bitmap;
+    private int[] _pixels = [];
+    private RasterPixel[] _map = [];
+    private Rect _rasterBounds;
+    private Size _rasterSize;
+    private GlowLayer _rasterLayer;
+    private double _rasterScale;
+    private FrameKey? _lastFrame;
 
-    // Kept for callers that also style the panel's accent. Rainbow emission has
-    // its own full spectrum, independent of the chosen UI accent color.
+    // The wave has its own palette, independent of the UI accent.
     public static readonly DependencyProperty GlowColorProperty = DependencyProperty.Register(
         nameof(GlowColor), typeof(Color), typeof(ReactiveGlowSurface),
         new FrameworkPropertyMetadata(Color.FromRgb(101, 221, 242)));
-
     public static readonly DependencyProperty LevelProperty = DependencyProperty.Register(
         nameof(Level), typeof(double), typeof(ReactiveGlowSurface),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender, null, Normalize));
-
     public static readonly DependencyProperty IntensityProperty = DependencyProperty.Register(
         nameof(Intensity), typeof(double), typeof(ReactiveGlowSurface),
         new FrameworkPropertyMetadata(.65d, FrameworkPropertyMetadataOptions.AffectsRender, null, Normalize));
-
     public static readonly DependencyProperty PhaseProperty = DependencyProperty.Register(
         nameof(Phase), typeof(double), typeof(ReactiveGlowSurface),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender, null, NormalizePhase));
-
     public static readonly DependencyProperty LayerProperty = DependencyProperty.Register(
         nameof(Layer), typeof(GlowLayer), typeof(ReactiveGlowSurface),
         new FrameworkPropertyMetadata(GlowLayer.Outer, FrameworkPropertyMetadataOptions.AffectsRender),
         value => value is GlowLayer layer && Enum.IsDefined(layer));
-
     public static readonly DependencyProperty EffectStyleProperty = DependencyProperty.Register(
         nameof(EffectStyle), typeof(string), typeof(ReactiveGlowSurface),
         new FrameworkPropertyMetadata(GlowStyles.RainbowWave, FrameworkPropertyMetadataOptions.AffectsRender,
             null, (_, value) => GlowStyles.Normalize(value as string)));
-
     public static readonly DependencyProperty PulseProperty = DependencyProperty.Register(
         nameof(Pulse), typeof(double), typeof(ReactiveGlowSurface),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender, null, Normalize));
-
     public static readonly DependencyProperty PulsePositionProperty = DependencyProperty.Register(
         nameof(PulsePosition), typeof(double), typeof(ReactiveGlowSurface),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender, null, NormalizePhase));
@@ -100,6 +89,7 @@ public sealed class ReactiveGlowSurface : FrameworkElement
         IsHitTestVisible = false;
         Focusable = false;
         ClipToBounds = false;
+        RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.Linear);
     }
 
     private static object Normalize(DependencyObject owner, object value)
@@ -109,7 +99,6 @@ public sealed class ReactiveGlowSurface : FrameworkElement
     {
         if (value is not double number || !double.IsFinite(number)) return 0d;
         var phase = number - Math.Floor(number);
-        // Subtracting a tiny negative value from -1 can round up to exactly one.
         return phase >= 1 ? 0d : phase;
     }
 
@@ -118,385 +107,289 @@ public sealed class ReactiveGlowSurface : FrameworkElement
         base.OnRender(drawing);
         var strength = Level * Intensity;
         if (strength <= 0 || ActualWidth < 2 || ActualHeight < 2) return;
-        EnsureGeometry();
-        var phaseOffset = (int)(Phase * PaletteSize);
-        if (EffectStyle == GlowStyles.NeonFlow)
+        EnsureRaster();
+        var pulse = (int)Math.Round(Pulse * 255);
+        var frame = new FrameKey((int)(Phase * PaletteSize), (int)Math.Round(strength * 65535),
+            pulse, pulse == 0 ? 0 : (int)(PulsePosition * PaletteSize), EffectStyle == GlowStyles.NeonFlow);
+        if (_lastFrame != frame)
         {
-            EnsureSmoothGeometry();
-            RenderNeon(drawing, phaseOffset, strength);
-            return;
+            Rasterize(frame);
+            _bitmap!.WritePixels(new Int32Rect(0, 0, _bitmap.PixelWidth, _bitmap.PixelHeight),
+                _pixels, _bitmap.PixelWidth * 4, 0);
+            _lastFrame = frame;
         }
-        if (Layer is GlowLayer.Inner or GlowLayer.Both)
+        drawing.DrawImage(_bitmap, _rasterBounds);
+    }
+
+    private void Rasterize(FrameKey frame)
+    {
+        var strength = frame.Strength / 65535f;
+        var pulse = (float)Math.Sqrt(frame.Pulse / 255d);
+        var pulseStrength = pulse * MathF.Sqrt(strength);
+        var fieldOpacity = Math.Min(1, strength * (1 + pulse * .20f));
+        var washOpacity = strength * (frame.Neon ? .25f : .24f);
+        var coreBase = frame.Neon ? MathF.Pow(strength, .30f) : 0;
+        var palette = frame.Neon ? Neon : Rainbow;
+        for (var index = 0; index < PaletteSize; index++)
         {
-            // A continuous wash bridges opposite perimeter hues at the medial
-            // line instead of drawing a sharp top/bottom color boundary.
-            drawing.PushOpacity(strength * .24);
-            drawing.DrawGeometry(WashPalette[phaseOffset], null, _innerClip!);
-            drawing.Pop();
-            DrawRings(drawing, _innerRings!, InnerAlpha, _innerClip!, phaseOffset, strength);
+            _colors[index] = new FrameColor(palette[(frame.Phase + index) % PaletteSize]);
+            var delta = (index - frame.Position + PaletteSize) % PaletteSize;
+            var weight = Math.Max(Comet[delta], Comet[(delta + PaletteSize / 2) % PaletteSize]);
+            _highlights[index] = pulse * weight;
+            _outerCore[index] = Math.Min(1, coreBase * .98f + pulseStrength * (.08f + .86f * weight));
+            _innerCore[index] = frame.Neon ? Math.Min(1, coreBase * .62f + pulseStrength * (.08f + .86f * weight)) : 0;
         }
-        if (Layer is GlowLayer.Outer or GlowLayer.Both)
+        for (var index = 0; index <= PaletteSize; index++)
         {
-            DrawRings(drawing, _outerRings!, OuterAlpha, _outerClip!, phaseOffset, strength, true);
-            if (Pulse > 0)
+            var stop = Math.Min(11, index / 64);
+            var amount = (index - stop * 64) / 64f;
+            var from = palette[(frame.Phase + stop * 64) % PaletteSize];
+            var to = palette[(frame.Phase + (stop + 1) * 64) % PaletteSize];
+            _wash[index] = new FrameColor(from.R + (to.R - from.R) * amount,
+                from.G + (to.G - from.G) * amount, from.B + (to.B - from.B) * amount);
+        }
+        var mask = OuterMasks[(int)Math.Round(pulse * 32)];
+        var combined = Layer == GlowLayer.Both;
+        if (combined) Array.Clear(_pixels);
+        foreach (ref readonly var pixel in _map.AsSpan())
+        {
+            var color = _colors[pixel.Color];
+            var alpha = 0f;
+            var red = 0f;
+            var green = 0f;
+            var blue = 0f;
+            if (pixel.Inner)
             {
-                EnsureSmoothGeometry();
-                DrawSmooth(drawing, false, null, phaseOffset, strength, true);
-                DrawCore(drawing, false, strength, false);
+                var wash = _wash[pixel.Wash];
+                alpha = washOpacity;
+                red = wash.R * alpha;
+                green = wash.G * alpha;
+                blue = wash.B * alpha;
             }
-        }
-    }
-
-    private void DrawRings(DrawingContext drawing, Geometry[][] rings, double[] alpha,
-        Geometry clip, int phaseOffset, double strength, bool exterior = false)
-    {
-        var pulse = Math.Sqrt(Pulse);
-        drawing.PushClip(clip);
-        for (var ring = rings.Length - 1; ring >= 0; ring--)
-        {
-            drawing.PushOpacity(Math.Min(1, strength * alpha[ring]
-                * (1 + (exterior ? pulse * 1.5 * ring / (rings.Length - 1) : 0))));
-            for (var segment = 0; segment < _segments; segment++)
+            if (frame.Neon)
             {
-                var colorIndex = (phaseOffset + segment * PaletteSize / _segments) % PaletteSize;
-                drawing.DrawGeometry(Rainbow[colorIndex], null, rings[ring][segment]);
+                var highlight = _highlights[pixel.Color] * (pixel.Inner ? .42f : 1);
+                var field = new FrameColor(color.R + (255 - color.R) * highlight,
+                    color.G + (255 - color.G) * highlight, color.B + (255 - color.B) * highlight);
+                var fieldAlpha = (pixel.Inner ? InnerMask[pixel.Mask] : mask[pixel.Mask]) * fieldOpacity;
+                Over(ref red, ref green, ref blue, ref alpha, field, fieldAlpha);
             }
-            drawing.Pop();
-        }
-        drawing.Pop();
-    }
-
-    private void RenderNeon(DrawingContext drawing, int phaseOffset, double strength)
-    {
-        if (Layer is GlowLayer.Inner or GlowLayer.Both)
-        {
-            drawing.PushOpacity(strength * .25);
-            drawing.DrawGeometry(NeonWashPalette[phaseOffset], null, _innerClip!);
-            drawing.Pop();
-            DrawSmooth(drawing, true, Neon, phaseOffset, strength);
-            DrawCore(drawing, true, strength, true);
-        }
-        if (Layer is GlowLayer.Outer or GlowLayer.Both)
-        {
-            DrawSmooth(drawing, false, Neon, phaseOffset, strength);
-            DrawCore(drawing, false, strength, true);
-        }
-    }
-
-    private void DrawSmooth(DrawingContext drawing, bool inner, Brush[]? palette,
-        int phaseOffset, double strength, bool highlightsOnly = false)
-    {
-        var strips = inner ? _innerStrips! : _outerStrips!;
-        var transforms = inner ? _innerTransforms! : _outerTransforms!;
-        // Typical detected hits are below one. A perceptual response makes
-        // those hits readable while leaving zero-pulse styling unchanged.
-        var pulse = Math.Sqrt(Pulse);
-        drawing.PushClip(inner ? _innerClip! : _outerClip!);
-        drawing.PushOpacity(Math.Min(1, strength * (1 + pulse * .20)));
-        // Composite the color field before applying one shared capsule falloff.
-        // Segment joins cannot accumulate translucent alpha into radial spikes.
-        drawing.PushOpacityMask(inner ? _innerMask! : _outerMasks![(int)Math.Round(pulse * 32)]);
-        for (var segment = 0; segment < _segments; segment++)
-        {
-            drawing.PushTransform(transforms[segment]);
-            if (!highlightsOnly && palette is not null)
-                drawing.DrawGeometry(palette[(phaseOffset + segment * PaletteSize / _segments) % PaletteSize],
-                    null, strips[segment]);
-            if (Pulse > 0)
+            else
             {
-                var highlight = pulse * CometWeight((segment + .5) / _segments);
-                drawing.PushOpacity(highlight * (inner ? .42 : 1));
-                drawing.DrawGeometry(Brushes.White, null, strips[segment]);
-                drawing.Pop();
+                var ringAlpha = Math.Min(1, strength * (pixel.RingAlpha + pulse * pixel.RingPulse));
+                Over(ref red, ref green, ref blue, ref alpha, color, ringAlpha);
+                if (!pixel.Inner && frame.Pulse > 0)
+                    Over(ref red, ref green, ref blue, ref alpha, FrameColor.White,
+                        mask[pixel.Mask] * fieldOpacity * _highlights[pixel.Color]);
             }
-            drawing.Pop();
-        }
-        drawing.Pop();
-        drawing.Pop();
-        drawing.Pop();
-    }
-
-    private void DrawCore(DrawingContext drawing, bool inner, double strength, bool continuous)
-    {
-        var core = inner ? _innerCore! : _outerCore!;
-        var baseOpacity = continuous ? Math.Pow(strength, .30) * (inner ? .62 : .98) : 0;
-        var pulse = Math.Sqrt(Pulse);
-        drawing.PushClip(inner ? _innerClip! : _outerClip!);
-        for (var segment = 0; segment < _segments; segment++)
-        {
-            var flash = pulse * Math.Sqrt(strength)
-                * (.08 + .86 * CometWeight((segment + .5) / _segments));
-            drawing.PushOpacity(Math.Min(1, baseOpacity + flash));
-            drawing.DrawGeometry(Brushes.White, null, core[segment]);
-            drawing.Pop();
-        }
-        drawing.Pop();
-    }
-
-    private double CometWeight(double position)
-    {
-        var first = Weight(position - PulsePosition);
-        var opposite = Weight(position - PulsePosition - .5);
-        return Math.Min(1, Math.Max(first, opposite));
-
-        static double Weight(double delta)
-        {
-            delta -= Math.Floor(delta + .5);
-            var head = Math.Exp(-Math.Pow(delta / .035, 2));
-            var tail = delta <= 0 ? .7 * Math.Exp(delta / .09) : 0;
-            return Math.Max(head, tail);
-        }
-    }
-
-    private void EnsureSmoothGeometry()
-    {
-        if (_outerStrips is not null) return;
-        _outerStrips = new Geometry[_segments];
-        _innerStrips = new Geometry[_segments];
-        _innerTransforms = new MatrixTransform[_segments];
-        _outerTransforms = new MatrixTransform[_segments];
-        _outerMasks = new DrawingBrush[33];
-        for (var width = 0; width < _outerMasks.Length; width++)
-            _outerMasks[width] = CreateCapsuleMask(16 + 6 * width / 32d, false);
-        _innerMask = CreateCapsuleMask(_radius, true);
-        var step = _perimeter / _segments;
-        for (var segment = 0; segment < _segments; segment++)
-        {
-            var middle = OffsetPoint(_capsule, _radius, _perimeter, (segment + .5) * step, 0);
-            var normal = OffsetPoint(_capsule, _radius, _perimeter, (segment + .5) * step, 1) - middle;
-            var tangent = new Vector(-normal.Y, normal.X);
-            _outerStrips[segment] = BuildSmoothStrip(segment, step, 22, middle, normal, tangent);
-            _innerStrips[segment] = BuildSmoothStrip(segment, step, -_radius, middle, normal, tangent);
-            _innerTransforms[segment] = MakeTransform(-_radius);
-            _outerTransforms[segment] = MakeTransform(22);
-
-            MatrixTransform MakeTransform(double depth)
+            var core = (pixel.Inner ? _innerCore[pixel.Color] : _outerCore[pixel.Color]) * pixel.Core;
+            if (core > 0) Over(ref red, ref green, ref blue, ref alpha, FrameColor.White, core);
+            red *= pixel.Coverage;
+            green *= pixel.Coverage;
+            blue *= pixel.Coverage;
+            alpha *= pixel.Coverage;
+            if (combined)
             {
-                var transform = new MatrixTransform(tangent.X, tangent.Y,
-                    normal.X * depth, normal.Y * depth, middle.X, middle.Y);
-                transform.Freeze();
-                return transform;
+                var previous = (uint)_pixels[pixel.Offset];
+                var remaining = 1 - alpha;
+                red += ((previous >> 16) & 255) * remaining;
+                green += ((previous >> 8) & 255) * remaining;
+                blue += (previous & 255) * remaining;
+                alpha += (previous >> 24) / 255f * remaining;
             }
+            var a = Math.Clamp((int)(alpha * 255 + .5f), 0, 255);
+            var r = Math.Clamp((int)(red + .5f), 0, a);
+            var g = Math.Clamp((int)(green + .5f), 0, a);
+            var b = Math.Clamp((int)(blue + .5f), 0, a);
+            _pixels[pixel.Offset] = a << 24 | r << 16 | g << 8 | b;
         }
-        _outerCore = BuildRings(_capsule, _radius, _perimeter, [0, 1.4])[0];
-        _innerCore = BuildRings(_capsule, _radius, _perimeter, [0, -.8])[0];
     }
 
-    private Geometry BuildSmoothStrip(int segment, double step, double depth,
-        Point middle, Vector normal, Vector tangent)
+    private static void Over(ref float red, ref float green, ref float blue, ref float alpha, FrameColor color, float opacity)
     {
-        var start = segment * step - .25;
-        var end = (segment + 1) * step + .25;
-        var subdivisions = Math.Max(2, (int)Math.Ceiling((end - start) / 2));
-        var geometry = new StreamGeometry();
-        using (var path = geometry.Open())
-        {
-            path.BeginFigure(Local(start, 0), true, true);
-            for (var index = 1; index <= subdivisions; index++)
-                path.LineTo(Local(start + (end - start) * index / subdivisions, 0), true, false);
-            for (var index = subdivisions; index >= 0; index--)
-                path.LineTo(Local(start + (end - start) * index / subdivisions, depth), true, false);
-        }
-        geometry.Freeze();
-        return geometry;
-
-        Point Local(double distance, double offset)
-        {
-            var vector = OffsetPoint(_capsule, _radius, _perimeter, distance, offset) - middle;
-            return new Point(Vector.Multiply(vector, tangent), Vector.Multiply(vector, normal) / depth);
-        }
+        var remaining = 1 - opacity;
+        red = color.R * opacity + red * remaining;
+        green = color.G * opacity + green * remaining;
+        blue = color.B * opacity + blue * remaining;
+        alpha = opacity + alpha * remaining;
     }
 
-    private void EnsureGeometry()
+    private void EnsureRaster()
     {
         var size = new Size(ActualWidth, ActualHeight);
-        if (_outerRings is not null && _geometrySize == size) return;
-        _geometrySize = size;
+        var scale = EffectiveRasterScale();
+        var padding = Layer == GlowLayer.Inner ? 0 : Padding;
+        var width = ActualWidth + padding * 2;
+        var height = ActualHeight + padding * 2;
+        scale = Math.Min(scale, Math.Sqrt(MaximumPixels / (width * height)));
+        scale = Math.Min(scale, 16384 / Math.Max(width, height));
+        if (_bitmap is not null && _rasterSize == size && _rasterLayer == Layer && Math.Abs(_rasterScale - scale) < .001) return;
+        _rasterSize = size;
+        _rasterLayer = Layer;
+        _rasterScale = scale;
+        var pixelWidth = Math.Max(1, (int)Math.Ceiling(width * scale));
+        var pixelHeight = Math.Max(1, (int)Math.Ceiling(height * scale));
+        _bitmap = new WriteableBitmap(pixelWidth, pixelHeight, 96 * scale, 96 * scale, PixelFormats.Pbgra32, null);
+        _pixels = new int[pixelWidth * pixelHeight];
+        _rasterBounds = new Rect(-padding, -padding, pixelWidth / scale, pixelHeight / scale);
+        _lastFrame = null;
         var capsule = new Rect(.5, .5, ActualWidth - 1, ActualHeight - 1);
         var radius = Math.Min(capsule.Width, capsule.Height) / 2;
-        var perimeter = 2 * (capsule.Width + capsule.Height - 4 * radius) + 2 * Math.PI * radius;
-        _capsule = capsule;
-        _radius = radius;
-        _perimeter = perimeter;
-        _outerStrips = _innerStrips = _outerCore = _innerCore = null;
-        _outerTransforms = null;
-        _innerTransforms = null;
-        _outerMasks = null;
-        _innerMask = null;
-        _segments = Math.Clamp((int)Math.Ceiling(perimeter / 8), 96, 192);
-        var inner = new RectangleGeometry(capsule, radius, radius);
-        inner.Freeze();
-        _innerClip = inner;
-        var outer = new RectangleGeometry(new Rect(-23, -23, ActualWidth + 46, ActualHeight + 46));
-        var outside = new CombinedGeometry(GeometryCombineMode.Exclude, outer, inner);
-        outside.Freeze();
-        _outerClip = outside;
-        _outerRings = BuildRings(capsule, radius, perimeter, OuterDistances);
-        var innerDistances = InnerFractions.Select(fraction => -fraction * radius).ToArray();
-        _innerRings = BuildRings(capsule, radius, perimeter, innerDistances);
-    }
-
-    private Geometry[][] BuildRings(Rect capsule, double radius, double perimeter, double[] distances)
-    {
-        var rings = new Geometry[distances.Length - 1][];
-        var step = perimeter / _segments;
-        for (var ring = 0; ring < rings.Length; ring++)
+        var horizontal = capsule.Width - 2 * radius;
+        var vertical = capsule.Height - 2 * radius;
+        var perimeter = 2 * (horizontal + vertical) + Math.PI * 2 * radius;
+        var halfPixel = .5 / scale;
+        var includeInner = Layer is GlowLayer.Inner or GlowLayer.Both;
+        var includeOuter = Layer is GlowLayer.Outer or GlowLayer.Both;
+        var map = new List<RasterPixel>(Math.Min(pixelWidth * pixelHeight, 200_000));
+        for (var y = 0; y < pixelHeight; y++)
         {
-            rings[ring] = new Geometry[_segments];
-            for (var segment = 0; segment < _segments; segment++)
+            var py = -padding + (y + .5) / scale;
+            for (var x = 0; x < pixelWidth; x++)
             {
-                // A subpixel overlap removes raster seams between cached strips.
-                // Colors differ by only a few degrees, so the join stays smooth.
-                var start = segment * step - .18;
-                var end = (segment + 1) * step + .18;
-                var subdivisions = Math.Max(2, (int)Math.Ceiling((end - start) / 2));
-                var geometry = new StreamGeometry();
-                using (var path = geometry.Open())
+                var px = -padding + (x + .5) / scale;
+                var cx = Math.Clamp(px, capsule.Left + radius, capsule.Right - radius);
+                var cy = Math.Clamp(py, capsule.Top + radius, capsule.Bottom - radius);
+                var dx = px - cx;
+                var dy = py - cy;
+                var distance = Math.Sqrt(dx * dx + dy * dy) - radius;
+                var inside = includeInner && distance < halfPixel;
+                var outside = includeOuter && distance > -halfPixel && distance < 22 + halfPixel;
+                if (!inside && !outside) continue;
+                var position = PerimeterPosition(px, py, dx, dy, capsule, radius, horizontal, vertical) / perimeter;
+                var color = (ushort)((int)(position * PaletteSize) % PaletteSize);
+                var gradientX = capsule.Width;
+                var gradientY = -.6 * capsule.Height;
+                var washPosition = ((px - capsule.Left) * gradientX + (py - capsule.Top - .8 * capsule.Height) * gradientY)
+                    / (gradientX * gradientX + gradientY * gradientY);
+                var wash = (ushort)Math.Clamp((int)Math.Round(washPosition * PaletteSize), 0, PaletteSize);
+                if (inside) Add(true, -distance, Math.Clamp(.5 - distance * scale, 0, 1));
+                if (outside) Add(false, distance, Math.Clamp(.5 + distance * scale, 0, 1));
+
+                void Add(bool inner, double depth, double coverage)
                 {
-                    path.BeginFigure(OffsetPoint(capsule, radius, perimeter, start, distances[ring]), true, true);
-                    for (var index = 1; index <= subdivisions; index++)
-                        path.LineTo(OffsetPoint(capsule, radius, perimeter,
-                            start + (end - start) * index / subdivisions, distances[ring]), true, false);
-                    for (var index = subdivisions; index >= 0; index--)
-                        path.LineTo(OffsetPoint(capsule, radius, perimeter,
-                            start + (end - start) * index / subdivisions, distances[ring + 1]), true, false);
+                    var normalized = Math.Max(0, depth);
+                    var maskIndex = inner ? Math.Clamp((int)Math.Round(normalized / radius * InsideSteps), 0, InsideSteps)
+                        : Math.Clamp((int)Math.Round(normalized * DepthSteps), 0, 22 * DepthSteps);
+                    var (ring, boost) = BandAlpha(normalized, halfPixel, inner, radius);
+                    var coreWidth = inner ? .8 : 1.4;
+                    var core = Math.Clamp((coreWidth - normalized) * scale + .5, 0, 1);
+                    map.Add(new RasterPixel(y * pixelWidth + x, color, wash, (ushort)maskIndex, inner,
+                        (float)coverage, ring, boost, (float)core));
                 }
-                geometry.Freeze();
-                rings[ring][segment] = geometry;
             }
         }
-        return rings;
+        _map = map.ToArray();
     }
 
-    private static Point OffsetPoint(Rect rect, double radius, double perimeter, double distance, double offset)
+    private double EffectiveRasterScale()
     {
-        distance = (distance % perimeter + perimeter) % perimeter;
-        var horizontal = rect.Width - 2 * radius;
-        var vertical = rect.Height - 2 * radius;
+        var scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        Visual root = this;
+        while (VisualTreeHelper.GetParent(root) is Visual parent) root = parent;
+        if (!ReferenceEquals(root, this))
+        {
+            var transform = TransformToAncestor(root);
+            var origin = transform.Transform(new Point());
+            var x = transform.Transform(new Point(1, 0)) - origin;
+            var y = transform.Transform(new Point(0, 1)) - origin;
+            scale *= Math.Max(x.Length, y.Length);
+        }
+        // The halo is deliberately soft; 1.5 pixels/DIP retains its thin core
+        // without a 4K/high-DPI display multiplying texture work without bound.
+        return Math.Clamp(Math.Ceiling(scale * 8) / 8, .5, 1.5);
+    }
+
+    private static double PerimeterPosition(double x, double y, double dx, double dy,
+        Rect rect, double radius, double horizontal, double vertical)
+    {
         var quarter = Math.PI * radius / 2;
-        if (distance < horizontal) return new Point(rect.Left + radius + distance, rect.Top - offset);
-        distance -= horizontal;
-        if (distance < quarter) return Arc(rect.Right - radius, rect.Top + radius, -Math.PI / 2 + distance / radius);
-        distance -= quarter;
-        if (distance < vertical) return new Point(rect.Right + offset, rect.Top + radius + distance);
-        distance -= vertical;
-        if (distance < quarter) return Arc(rect.Right - radius, rect.Bottom - radius, distance / radius);
-        distance -= quarter;
-        if (distance < horizontal) return new Point(rect.Right - radius - distance, rect.Bottom + offset);
-        distance -= horizontal;
-        if (distance < quarter) return Arc(rect.Left + radius, rect.Bottom - radius, Math.PI / 2 + distance / radius);
-        distance -= quarter;
-        if (distance < vertical) return new Point(rect.Left - offset, rect.Bottom - radius - distance);
-        distance -= vertical;
-        return Arc(rect.Left + radius, rect.Top + radius, Math.PI + distance / radius);
-
-        Point Arc(double centerX, double centerY, double angle)
-            => new(centerX + (radius + offset) * Math.Cos(angle), centerY + (radius + offset) * Math.Sin(angle));
+        if (horizontal > 0 && x >= rect.Left + radius && x <= rect.Right - radius)
+            return y <= rect.Top + rect.Height / 2 ? x - rect.Left - radius
+                : horizontal + 2 * quarter + vertical + rect.Right - radius - x;
+        if (vertical > 0 && y >= rect.Top + radius && y <= rect.Bottom - radius)
+            return x >= rect.Left + rect.Width / 2 ? horizontal + quarter + y - rect.Top - radius
+                : 2 * horizontal + 3 * quarter + vertical + rect.Bottom - radius - y;
+        var angle = Math.Atan2(dy, dx);
+        if (dx >= 0) return dy < 0 ? horizontal + (angle + Math.PI / 2) * radius
+            : horizontal + quarter + vertical + angle * radius;
+        return dy >= 0 ? 2 * horizontal + 2 * quarter + vertical + (angle - Math.PI / 2) * radius
+            : 2 * horizontal + 3 * quarter + 2 * vertical + (angle + Math.PI) * radius;
     }
 
-    private static LinearGradientBrush[] CreateWashPalette(Brush[] palette)
+    private static (float Alpha, float Boost) BandAlpha(double depth, double halfPixel, bool inner, double radius)
     {
-        var washes = new LinearGradientBrush[PaletteSize];
-        for (var phase = 0; phase < washes.Length; phase++)
+        var boundaries = inner ? InnerFractions : OuterDistances;
+        var alpha = inner ? InnerAlpha : OuterAlpha;
+        var low = depth - halfPixel;
+        var high = depth + halfPixel;
+        var total = 0d;
+        var boost = 0d;
+        for (var band = 0; band < alpha.Length; band++)
         {
-            var brush = new LinearGradientBrush { StartPoint = new Point(0, .8), EndPoint = new Point(1, .2) };
-            for (var stop = 0; stop <= 12; stop++)
-                brush.GradientStops.Add(new GradientStop(((SolidColorBrush)palette[(phase + stop * PaletteSize / 12) % PaletteSize]).Color,
-                    stop / 12d));
-            brush.Freeze();
-            washes[phase] = brush;
+            var from = band == 0 ? double.NegativeInfinity : boundaries[band] * (inner ? radius : 1);
+            var to = boundaries[band + 1] * (inner ? radius : 1);
+            var weight = Math.Max(0, Math.Min(high, to) - Math.Max(low, from)) / (2 * halfPixel);
+            total += alpha[band] * weight;
+            if (!inner) boost += alpha[band] * weight * 1.5 * band / (alpha.Length - 1);
         }
-        return washes;
+        return ((float)total, (float)boost);
     }
 
-    private DrawingBrush CreateCapsuleMask(double depth, bool inner)
+    private static float[][] CreateOuterMasks()
     {
-        var group = new DrawingGroup();
-        // Only the rectangular mask partitions use aliased edges. Their shared
-        // boundaries then have neither gaps nor doubled alpha; the radial and
-        // linear gradient samples still provide the continuous soft falloff.
-        RenderOptions.SetEdgeMode(group, EdgeMode.Aliased);
-        var rect = _capsule;
-        var radius = _radius;
-        var horizontal = Math.Max(0, rect.Width - 2 * radius);
-        var vertical = Math.Max(0, rect.Height - 2 * radius);
-        var extent = inner ? radius : radius + depth;
-        using (var drawing = group.Open())
+        var masks = new float[33][];
+        for (var width = 0; width < masks.Length; width++)
         {
-            if (horizontal > 0)
-            {
-                DrawBand(new Rect(rect.Left + radius, inner ? rect.Top : rect.Top - depth, horizontal, depth),
-                    new Point(0, rect.Top), new Point(0, rect.Top + (inner ? depth : -depth)));
-                DrawBand(new Rect(rect.Left + radius, inner ? rect.Bottom - depth : rect.Bottom, horizontal, depth),
-                    new Point(0, rect.Bottom), new Point(0, rect.Bottom + (inner ? -depth : depth)));
-            }
-            if (vertical > 0)
-            {
-                DrawBand(new Rect(inner ? rect.Left : rect.Left - depth, rect.Top + radius, depth, vertical),
-                    new Point(rect.Left, 0), new Point(rect.Left + (inner ? depth : -depth), 0));
-                DrawBand(new Rect(inner ? rect.Right - depth : rect.Right, rect.Top + radius, depth, vertical),
-                    new Point(rect.Right, 0), new Point(rect.Right + (inner ? -depth : depth), 0));
-            }
-            DrawCorner(new Point(rect.Left + radius, rect.Top + radius), -1, -1);
-            DrawCorner(new Point(rect.Right - radius, rect.Top + radius), 1, -1);
-            DrawCorner(new Point(rect.Right - radius, rect.Bottom - radius), 1, 1);
-            DrawCorner(new Point(rect.Left + radius, rect.Bottom - radius), -1, 1);
-
-            void DrawBand(Rect bounds, Point start, Point end)
-            {
-                var gradient = new LinearGradientBrush
-                {
-                    MappingMode = BrushMappingMode.Absolute, StartPoint = start, EndPoint = end
-                };
-                AddStops(gradient.GradientStops, inner, 0, 1);
-                gradient.Freeze();
-                drawing.DrawRectangle(gradient, null, bounds);
-            }
-
-            void DrawCorner(Point center, int x, int y)
-            {
-                var gradient = new RadialGradientBrush
-                {
-                    MappingMode = BrushMappingMode.Absolute, Center = center, GradientOrigin = center,
-                    RadiusX = extent, RadiusY = extent
-                };
-                if (inner) AddStops(gradient.GradientStops, true, 1, -1);
-                else
-                {
-                    gradient.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(BloomAlpha[0] * 255), 255, 255, 255), 0));
-                    AddStops(gradient.GradientStops, false, radius / extent, depth / extent);
-                }
-                gradient.Freeze();
-                drawing.DrawRectangle(gradient, null, new Rect(center.X + (x < 0 ? -extent : 0),
-                    center.Y + (y < 0 ? -extent : 0), extent, extent));
-            }
+            masks[width] = new float[22 * DepthSteps + 1];
+            var depth = 16 + 6 * width / 32d;
+            for (var index = 0; index < masks[width].Length; index++)
+                masks[width][index] = Falloff(index / (double)DepthSteps / depth, BloomPositions, BloomAlpha);
         }
-        group.Freeze();
-        var bounds = inner ? rect : new Rect(rect.Left - depth, rect.Top - depth,
-            rect.Width + 2 * depth, rect.Height + 2 * depth);
-        var brush = new DrawingBrush(group)
-        {
-            ViewboxUnits = BrushMappingMode.Absolute, ViewportUnits = BrushMappingMode.Absolute,
-            Viewbox = bounds, Viewport = bounds, Stretch = Stretch.Fill, TileMode = TileMode.None
-        };
-        brush.Freeze();
-        return brush;
-
-        static void AddStops(GradientStopCollection stops, bool inside, double start, double span)
-        {
-            var positions = inside ? InsidePositions : BloomPositions;
-            var alpha = inside ? InsideAlpha : BloomAlpha;
-            for (var index = 0; index < positions.Length; index++)
-                stops.Add(new GradientStop(Color.FromArgb((byte)(alpha[index] * 255), 255, 255, 255),
-                    start + positions[index] * span));
-        }
+        return masks;
     }
 
-    private static Brush[] CreateNeonPalette()
+    private static float[] CreateInnerMask()
+    {
+        var mask = new float[InsideSteps + 1];
+        for (var index = 0; index < mask.Length; index++)
+            mask[index] = Falloff(index / (double)InsideSteps, InsidePositions, InsideAlpha);
+        return mask;
+    }
+
+    private static float Falloff(double value, double[] positions, double[] alpha)
+    {
+        if (value >= 1) return 0;
+        for (var index = 1; index < positions.Length; index++)
+            if (value <= positions[index])
+            {
+                var amount = (value - positions[index - 1]) / (positions[index] - positions[index - 1]);
+                var from = (byte)(alpha[index - 1] * 255) / 255d;
+                var to = (byte)(alpha[index] * 255) / 255d;
+                return (float)(from + (to - from) * amount);
+            }
+        return 0;
+    }
+
+    private static float[] CreateComet()
+    {
+        var weights = new float[PaletteSize];
+        for (var index = 0; index < weights.Length; index++)
+        {
+            var delta = index / (double)PaletteSize;
+            if (delta >= .5) delta -= 1;
+            var head = Math.Exp(-Math.Pow(delta / .035, 2));
+            var tail = delta <= 0 ? .7 * Math.Exp(delta / .09) : 0;
+            weights[index] = (float)Math.Max(head, tail);
+        }
+        return weights;
+    }
+
+    private static Color[] CreateNeonPalette()
     {
         Color[] anchors = [Color.FromRgb(0, 225, 255), Color.FromRgb(50, 113, 255),
             Color.FromRgb(255, 35, 225), Color.FromRgb(155, 58, 255), Color.FromRgb(0, 225, 255)];
-        var palette = new Brush[PaletteSize];
+        var palette = new Color[PaletteSize];
         for (var index = 0; index < palette.Length; index++)
         {
             var position = index * (anchors.Length - 1d) / palette.Length;
@@ -504,17 +397,15 @@ public sealed class ReactiveGlowSurface : FrameworkElement
             var amount = position - anchor;
             var from = anchors[anchor];
             var to = anchors[anchor + 1];
-            var brush = new SolidColorBrush(Color.FromRgb((byte)(from.R + (to.R - from.R) * amount),
-                (byte)(from.G + (to.G - from.G) * amount), (byte)(from.B + (to.B - from.B) * amount)));
-            brush.Freeze();
-            palette[index] = brush;
+            palette[index] = Color.FromRgb((byte)(from.R + (to.R - from.R) * amount),
+                (byte)(from.G + (to.G - from.G) * amount), (byte)(from.B + (to.B - from.B) * amount));
         }
         return palette;
     }
 
-    private static Brush[] CreatePalette()
+    private static Color[] CreatePalette()
     {
-        var palette = new Brush[PaletteSize];
+        var palette = new Color[PaletteSize];
         for (var index = 0; index < palette.Length; index++)
         {
             var hue = index * 6d / palette.Length;
@@ -529,11 +420,17 @@ public sealed class ReactiveGlowSurface : FrameworkElement
                 2 => (low, 1d, rising), 3 => (low, falling, 1d),
                 4 => (rising, low, 1d), _ => (1d, low, falling)
             };
-            var brush = new SolidColorBrush(Color.FromRgb((byte)(red * 255), (byte)(green * 255), (byte)(blue * 255)));
-            brush.Freeze();
-            palette[index] = brush;
+            palette[index] = Color.FromRgb((byte)(red * 255), (byte)(green * 255), (byte)(blue * 255));
         }
         return palette;
     }
-}
 
+    private readonly record struct FrameKey(int Phase, int Strength, int Pulse, int Position, bool Neon);
+    private readonly record struct RasterPixel(int Offset, ushort Color, ushort Wash, ushort Mask, bool Inner,
+        float Coverage, float RingAlpha, float RingPulse, float Core);
+    private readonly record struct FrameColor(float R, float G, float B)
+    {
+        public FrameColor(Color color) : this(color.R, color.G, color.B) { }
+        public static FrameColor White => new(255, 255, 255);
+    }
+}

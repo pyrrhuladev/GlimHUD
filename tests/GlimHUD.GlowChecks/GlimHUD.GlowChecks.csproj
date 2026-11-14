@@ -5,12 +5,16 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <GlowSurfaceSource Condition="'$(GlowSurfaceSource)' == ''">$(MSBuildThisFileDirectory)../../src/GlimHUD/Controls/ReactiveGlowSurface.cs</GlowSurfaceSource>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Keep normal build artifacts excluded when a benchmark redirects obj/bin. -->
+    <Compile Remove="obj/**/*.cs;bin/**/*.cs" />
     <Compile Include="../../src/GlimHUD/Services/GlowEnvelope.cs" Link="GlowEnvelope.cs" />
-    <Compile Include="../../src/GlimHUD/Controls/ReactiveGlowSurface.cs" Link="ReactiveGlowSurface.cs" />
+    <Compile Include="$(GlowSurfaceSource)" Link="ReactiveGlowSurface.cs" />
     <Compile Include="../../src/GlimHUD/Controls/ReactiveGlowWindow.cs" Link="ReactiveGlowWindow.cs" />
     <Compile Include="../../src/GlimHUD/Models/GlowStyles.cs" Link="GlowStyles.cs" />
+    <AssemblyMetadata Include="GlowSurfaceSource" Value="$(GlowSurfaceSource)" />
   </ItemGroup>
 </Project>
 

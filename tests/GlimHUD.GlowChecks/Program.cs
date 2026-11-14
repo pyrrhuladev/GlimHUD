@@ -19,6 +19,11 @@ internal static class Program
     {
         try
         {
+            if (args.Length > 0 && args[0] == "--benchmark-render")
+            {
+                if (args.Length != 2) throw new ArgumentException("Usage: --benchmark-render <report.json>");
+                return GlowRenderBenchmark.Run(args[1]);
+            }
             var envelope = new GlowEnvelope();
             Check(envelope.Update(0, true, Frame) == 0, "Silence does not generate a synthetic beat.");
             var attack = envelope.Update(1, true, Frame);
@@ -53,6 +58,7 @@ internal static class Program
                 "Out-of-range levels and long scheduling gaps remain finite.");
 
             var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            CheckFrameAllocationBudget();
             var surface = new ReactiveGlowSurface();
             Check(!surface.IsHitTestVisible && !surface.Focusable && !surface.ClipToBounds,
                 "The surface is decorative, non-focusable and permits its outward halo.");
@@ -188,6 +194,34 @@ internal static class Program
             return 0;
         }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+    }
+
+    private static void CheckFrameAllocationBudget()
+    {
+        // A steady animated frame must not rebuild a vector scene or allocate
+        // pixel buffers. Leave generous room for WPF/runtime bookkeeping.
+        var surface = new ReactiveGlowSurface { Width = 1276, Height = 66, Layer = GlowLayer.Both, Level = .85, Intensity = .75 };
+        var canvas = new Canvas { Width = 1328, Height = 118 };
+        Canvas.SetLeft(surface, 26); Canvas.SetTop(surface, 26); canvas.Children.Add(surface);
+        canvas.Measure(new Size(canvas.Width, canvas.Height));
+        canvas.Arrange(new Rect(0, 0, canvas.Width, canvas.Height));
+        var target = new RenderTargetBitmap(1328, 118, 96, 96, PixelFormats.Pbgra32);
+        foreach (var style in new[] { GlowStyles.RainbowWave, GlowStyles.NeonFlow })
+        {
+            surface.EffectStyle = style;
+            for (var frame = 0; frame < 8; frame++) Draw(frame);
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var frame = 8; frame < 24; frame++) Draw(frame);
+            var perFrame = (GC.GetAllocatedBytesForCurrentThread() - before) / 16;
+            Check(perFrame < 64 * 1024, $"{style} steady animated frames stay within the UI allocation budget ({perFrame} bytes/frame).");
+        }
+        void Draw(int frame)
+        {
+            surface.Phase = frame / 240d;
+            surface.Pulse = .65;
+            surface.PulsePosition = frame / 48d;
+            canvas.UpdateLayout(); target.Clear(); target.Render(canvas);
+        }
     }
 
     private static void CheckCompanionWindow()
