@@ -14,6 +14,7 @@ To show the overlay and provide its controls, GlimHUD reads information exposed 
 - Running process identities, executable paths, and the foreground window, to identify games and select an FPS target.
 - Presented-frame events through PresentMon and local CPU, GPU, memory, and available temperature readings.
 - Local network adapter names and identifiers, connection state, reported link speed, and cumulative received/sent byte counters, to calculate adapter traffic rates and session totals. These readings can include traffic from all applications and the local network. GlimHUD does not capture packets, inspect their destinations or payloads, or send network probes for this feature.
+- During an update from an elevated HUD, local Explorer process identity, Windows account identifiers, session, and elevation state, to check whether a same-account ordinary-user installer handoff is available. These checks do not read passwords or create an account history.
 - The Windows accent color when the system accent option is enabled.
 
 These values are used locally for the overlay and its settings. They are not sent to a GlimHUD service. GlimHUD does not inject a DLL into a game.
@@ -21,6 +22,8 @@ These values are used locally for the overlay and its settings. They are not sen
 ## Local storage and controls
 
 Preferences are stored at `%LOCALAPPDATA%\GlimHUD\settings.json`. They can include appearance, language, source selections, selected application identities, game executable paths, and the selected network adapter identifier. Artwork may be held temporarily in memory for display; it is not a browsing or listening history database.
+
+Compact layout and the administrator-at-startup preference are also stored locally. For unpackaged copies, the administrator request is enabled by default and uses the normal Windows UAC prompt. Cancelling leaves GlimHUD running with normal permissions, and the option can be disabled in Settings. Windows handles UAC consent or administrator credentials; GlimHUD does not receive or store those credentials. Elevation does not add an upload or analytics service. If Windows starts the app under a different administrator account, that account has its own per-user settings and data locations.
 
 Network byte counters are sampled locally about once per second during normal app operation. The optional HUD network module is hidden by default. Per-adapter session totals and the recent 60-second graph stay in memory and are cleared when GlimHUD closes; traffic history is not saved to disk. A saved adapter choice identifies a local interface, not a list of websites or connections.
 

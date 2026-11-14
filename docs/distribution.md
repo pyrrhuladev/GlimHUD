@@ -22,6 +22,18 @@ This is separate from Authenticode, Windows publisher identity, and SmartScreen 
 
 Installed copies offer updates in Settings. Checks never force installation or restart. Portable copies link to GitHub Releases for manual replacement; packaged copies do not use this installer updater. Settings and update downloads stay under `%LOCALAPPDATA%\GlimHUD`.
 
+## Elevation and per-user updates
+
+GlimHUD keeps an `asInvoker` manifest. Its separate administrator-at-startup preference is enabled by default for deployed unpackaged copies and requests elevation through the normal Windows UAC prompt. Approval starts an elevated instance; cancellation or a failed request continues normally. Settings can disable future automatic requests. Diagnostic and packaged launches skip this path. Elevation can improve FPS or hardware-sensor access; it is not required for music controls or network counters and does not guarantee every sensor will work.
+
+The installer remains per-user and does not need elevation. An elevated HUD delegates a requested update to the existing Explorer desktop only after checking that it belongs to the same account and session, is the Windows Explorer executable, and has a non-elevated medium-integrity token. It checks the desktop again before dispatch and revalidates the cached installer's signature after stopping HUD services. It does not relax cache permissions, create a shared staging directory, or fall back to starting the installer with its elevated token.
+
+If UAC was approved with a different administrator account, the HUD's settings and update cache belong to that account; the original desktop belongs to the signed-in user. This cross-account update handoff is intentionally blocked. A missing, replaced, or elevated Explorer desktop is also unavailable. For example, disabling UAC can leave an administrator's Explorer elevated, which cannot provide this handoff. Restart GlimHUD normally, or download the release installer and run it as the account that owns the installation.
+
+A failed desktop preflight leaves the HUD running. A later handoff failure can occur after the HUD has stopped; the app reports that manual restart or download is needed. A successful Shell handoff means the launch request was accepted, not that installation completed. No UAC policy or Windows group membership is changed.
+
+Microsoft references: [UAC account and token behavior](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/user-account-control/how-it-works), [Explorer-based unelevated launches](https://devblogs.microsoft.com/oldnewthing/20131118-00/?p=2643), and [the elevated-Explorer limitation when UAC is disabled](https://devblogs.microsoft.com/oldnewthing/20150618-00/?p=45351).
+
 ## One-time repository setup
 
 For the prepared workstation checkout, log in to an account that administers the repository, then run the helper:

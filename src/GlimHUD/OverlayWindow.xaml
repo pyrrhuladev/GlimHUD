@@ -52,17 +52,17 @@
         <Grid.LayoutTransform><ScaleTransform x:Name="PanelScale" ScaleX="1" ScaleY="1"/></Grid.LayoutTransform>
         <controls:ReactiveGlowSurface x:Name="MusicGlow" Layer="Inner" Visibility="Collapsed" IsHitTestVisible="False"/>
         <Border x:Name="PanelSurface" CornerRadius="34" BorderThickness="1" BorderBrush="{DynamicResource AccentPanelBorderBrush}" Background="{DynamicResource OverlayBackgroundBrush}">
-            <Grid Margin="24,8" Height="50">
+            <Grid x:Name="PanelContent" Margin="24,8" Height="50">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <StackPanel x:Name="MusicSection" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="48" Height="48" CornerRadius="12" Background="{DynamicResource AccentCoverBrush}" BorderBrush="{DynamicResource AccentCoverBorderBrush}" BorderThickness="1">
+                        <Border x:Name="ArtworkFrame" Width="48" Height="48" CornerRadius="12" Background="{DynamicResource AccentCoverBrush}" BorderBrush="{DynamicResource AccentCoverBorderBrush}" BorderThickness="1">
                             <Grid Width="46" Height="46">
                                 <Grid.Clip><RectangleGeometry Rect="0,0,46,46" RadiusX="11" RadiusY="11"/></Grid.Clip>
                                 <TextBlock x:Name="ArtworkPlaceholder" Text="♪" Foreground="{DynamicResource OverlayTextBrush}" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <Image x:Name="Artwork" Stretch="UniformToFill" Visibility="Collapsed"/>
                             </Grid>
                         </Border>
-                        <StackPanel Width="145" Margin="12,0,9,0" VerticalAlignment="Center">
+                        <StackPanel x:Name="TrackInfo" Width="145" Margin="12,0,9,0" VerticalAlignment="Center">
                             <TextBlock x:Name="TrackTitle" Text="{DynamicResource Loc.NoPlayback}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
                             <TextBlock x:Name="TrackArtist" Text="{DynamicResource Loc.OpenPlayer}" Foreground="{DynamicResource OverlayMutedTextBrush}" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
@@ -70,14 +70,14 @@
                             <Path Data="M 0,0 L 2,0 2,12 0,12 Z M 12,0 L 3,6 12,12 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Width="13" Height="13" Stretch="Uniform"/>
                         </Button>
                         <Button x:Name="PlayButton" Width="40" Height="40" Padding="0" Margin="2,0" Click="Play_Click" ToolTip="{DynamicResource Loc.PlayPause}" AutomationProperties.Name="{DynamicResource Loc.PlayPauseAccessible}">
-                            <Border Width="32" Height="32" CornerRadius="16" BorderBrush="{DynamicResource AccentBorderBrush}" BorderThickness="1" Background="{DynamicResource AccentSoftBrush}">
+                            <Border x:Name="PlaybackCircle" Width="32" Height="32" CornerRadius="16" BorderBrush="{DynamicResource AccentBorderBrush}" BorderThickness="1" Background="{DynamicResource AccentSoftBrush}">
                                 <Path x:Name="PlaybackGlyph" Data="M 2,0 L 12,7 2,14 Z" Fill="{DynamicResource OverlayTextBrush}" Width="11" Height="13" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                         </Button>
                         <Button x:Name="NextButton" Click="Next_Click" ToolTip="{DynamicResource Loc.NextTrack}" AutomationProperties.Name="{DynamicResource Loc.NextTrack}">
                             <Path Data="M 0,0 L 9,6 0,12 Z M 10,0 L 12,0 12,12 10,12 Z" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Width="13" Height="13" Stretch="Uniform"/>
                         </Button>
-                        <Border Style="{StaticResource Divider}" Margin="8,0"/>
+                        <Border x:Name="VolumeControlsDivider" Style="{StaticResource Divider}" Margin="8,0"/>
                         <Button x:Name="MuteButton" Width="25" Click="Mute_Click" ToolTip="{DynamicResource Loc.Mute}" AutomationProperties.Name="{DynamicResource Loc.Mute}">
                             <TextBlock x:Name="VolumeGlyph" FontFamily="Segoe MDL2 Assets" Text="&#xE767;" FontSize="16"/>
                         </Button>
@@ -89,16 +89,16 @@
                         <Border x:Name="MusicDivider" Style="{StaticResource Divider}"/>
                     </StackPanel>
                     <StackPanel x:Name="FpsSection" Orientation="Horizontal" VerticalAlignment="Center">
-                        <StackPanel Width="57">
-                            <TextBlock Text="FPS" Style="{StaticResource MetricLabel}"/>
+                        <StackPanel x:Name="FpsContent" Width="57">
+                            <TextBlock x:Name="FpsLabel" Text="FPS" Style="{StaticResource MetricLabel}"/>
                             <TextBlock x:Name="FpsValue" Text="-" TextAlignment="Left" Foreground="{DynamicResource OverlayTextBrush}" FontSize="28" FontWeight="SemiBold" LineHeight="29"/>
                         </StackPanel>
                         <Border x:Name="FpsDivider" Style="{StaticResource Divider}"/>
                     </StackPanel>
                     <StackPanel x:Name="CpuSection" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE950;" FontSize="24" Foreground="{DynamicResource OverlayIconBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
-                        <StackPanel Width="90">
-                            <TextBlock Text="CPU" Style="{StaticResource MetricLabel}"/>
+                        <TextBlock x:Name="CpuIcon" FontFamily="Segoe MDL2 Assets" Text="&#xE950;" FontSize="24" Foreground="{DynamicResource OverlayIconBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                        <StackPanel x:Name="CpuContent" Width="90">
+                            <TextBlock x:Name="CpuLabel" Text="CPU" Style="{StaticResource MetricLabel}"/>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
                                 <TextBlock x:Name="CpuValue" Text="-" Style="{StaticResource MetricValue}" Width="57"/>
                                 <TextBlock x:Name="CpuTemperature" Text="-" Width="33" TextAlignment="Right" FontSize="11" Foreground="{DynamicResource OverlayMutedTextBrush}" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
@@ -107,9 +107,9 @@
                         <Border x:Name="CpuDivider" Style="{StaticResource Divider}"/>
                     </StackPanel>
                     <StackPanel x:Name="GpuSection" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="24" Foreground="{DynamicResource OverlayIconBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
-                        <StackPanel Width="90">
-                            <TextBlock Text="GPU" Style="{StaticResource MetricLabel}"/>
+                        <TextBlock x:Name="GpuIcon" FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" FontSize="24" Foreground="{DynamicResource OverlayIconBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                        <StackPanel x:Name="GpuContent" Width="90">
+                            <TextBlock x:Name="GpuLabel" Text="GPU" Style="{StaticResource MetricLabel}"/>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock x:Name="GpuValue" Text="-" Style="{StaticResource MetricValue}" Width="57"/>
                                 <TextBlock x:Name="GpuTemperature" Text="-" Width="33" TextAlignment="Right" FontSize="11" Foreground="{DynamicResource OverlayMutedTextBrush}" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
@@ -118,9 +118,9 @@
                         <Border x:Name="GpuDivider" Style="{StaticResource Divider}"/>
                     </StackPanel>
                     <StackPanel x:Name="RamSection" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE964;" FontSize="24" Foreground="{DynamicResource OverlayIconBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
-                        <StackPanel Width="134">
-                            <TextBlock Text="{DynamicResource Loc.Ram}" Style="{StaticResource MetricLabel}"/>
+                        <TextBlock x:Name="RamIcon" FontFamily="Segoe MDL2 Assets" Text="&#xE964;" FontSize="24" Foreground="{DynamicResource OverlayIconBrush}" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                        <StackPanel x:Name="RamContent" Width="134">
+                            <TextBlock x:Name="RamLabel" Text="{DynamicResource Loc.Ram}" Style="{StaticResource MetricLabel}"/>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock x:Name="RamValue" Text="-" Style="{StaticResource MetricValue}" Width="57"/>
                                 <TextBlock x:Name="RamMemory" Text="-" Width="77" TextAlignment="Right" FontSize="10" Foreground="{DynamicResource OverlayMutedTextBrush}" VerticalAlignment="Bottom" Margin="0,0,0,5"/>
@@ -129,18 +129,20 @@
                         <Border x:Name="RamDivider" Style="{StaticResource Divider}"/>
                     </StackPanel>
                     <StackPanel x:Name="NetworkSection" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
-                        <Path Data="M 11,6 L 11,10 M 3,16 L 3,10 L 19,10 L 19,16 M 7,0 L 15,0 L 15,6 L 7,6 Z M 0,16 L 6,16 L 6,22 L 0,22 Z M 16,16 L 22,16 L 22,22 L 16,22 Z"
+                        <Path x:Name="NetworkIcon" Data="M 11,6 L 11,10 M 3,16 L 3,10 L 19,10 L 19,16 M 7,0 L 15,0 L 15,6 L 7,6 Z M 0,16 L 6,16 L 6,22 L 0,22 Z M 16,16 L 22,16 L 22,22 L 16,22 Z"
                               Width="22" Height="22" Stretch="Uniform" Stroke="{DynamicResource OverlayIconBrush}" StrokeThickness="1.4"
                               StrokeLineJoin="Round" VerticalAlignment="Center" Margin="0,0,9,0"/>
-                        <StackPanel Width="99">
-                            <TextBlock Text="{DynamicResource Loc.NetworkModule}" Style="{StaticResource MetricLabel}"/>
+                        <StackPanel x:Name="NetworkContent" Width="99">
+                            <TextBlock x:Name="NetworkLabel" Text="{DynamicResource Loc.NetworkModule}" Style="{StaticResource MetricLabel}"/>
+                            <StackPanel x:Name="NetworkRates">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="↓" Width="13" FontSize="13" Foreground="{DynamicResource OverlayIconBrush}"/>
+                                <TextBlock x:Name="NetworkDownloadDirection" Text="↓" Width="13" FontSize="13" Foreground="{DynamicResource OverlayIconBrush}"/>
                                 <TextBlock x:Name="NetworkDownloadValue" Text="—" FontSize="13" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="↑" Width="13" FontSize="13" Foreground="{DynamicResource OverlayMutedTextBrush}"/>
+                                <TextBlock x:Name="NetworkUploadDirection" Text="↑" Width="13" FontSize="13" Foreground="{DynamicResource OverlayMutedTextBrush}"/>
                                 <TextBlock x:Name="NetworkUploadValue" Text="—" FontSize="13" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular"/>
+                            </StackPanel>
                             </StackPanel>
                         </StackPanel>
                     </StackPanel>

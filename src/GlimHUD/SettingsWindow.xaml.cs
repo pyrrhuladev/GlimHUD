@@ -47,6 +47,8 @@ public partial class SettingsWindow : Window
         LanguageCombo.SelectedValue = L10n.NormalizeLanguage(settings.Language);
         OpacitySlider.Value = settings.BackgroundOpacity;
         ScaleSlider.Value = settings.Scale;
+        CompactModeCheck.IsChecked = settings.CompactMode;
+        RequestAdministratorCheck.IsChecked = settings.RequestAdministratorOnStartup;
         MusicCheck.IsChecked = settings.ShowMusic;
         FpsCheck.IsChecked = settings.ShowFps;
         CpuCheck.IsChecked = settings.ShowCpu;
@@ -165,6 +167,8 @@ public partial class SettingsWindow : Window
                 ? Visibility.Visible : Visibility.Collapsed;
             FpsAccessHint.Visibility = RestartAdminButton.Visibility;
             LockedCheck.IsChecked = _overlay.Settings.Locked;
+            CompactModeCheck.IsChecked = _overlay.Settings.CompactMode;
+            RequestAdministratorCheck.IsChecked = _overlay.Settings.RequestAdministratorOnStartup;
             SnapGridCheck.IsChecked = _overlay.Settings.SnapToGrid;
             MusicCheck.IsChecked = _overlay.Settings.ShowMusic;
             FpsCheck.IsChecked = _overlay.Settings.ShowFps;
@@ -426,6 +430,7 @@ public partial class SettingsWindow : Window
     {
         "FeedSignature" or "InstallerSignature" or "MissingKey" => "Loc.UpdateUnverified",
         "ElevatedInstall" => "Loc.UpdateElevated",
+        "DesktopUnavailable" or "InstallerLaunchFailed" => "Loc.UpdateDesktopUnavailable",
         "Cancelled" => "Loc.UpdateCancelled",
         _ => "Loc.UpdateFailed"
     };
@@ -603,6 +608,20 @@ public partial class SettingsWindow : Window
         settings.ShowGpu = GpuCheck.IsChecked == true;
         settings.ShowRam = RamCheck.IsChecked == true;
         settings.ShowNetwork = NetworkCheck.IsChecked == true;
+        ApplyAndSave();
+    }
+
+    private void CompactMode_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_syncing) return;
+        _overlay.Settings.CompactMode = CompactModeCheck.IsChecked == true;
+        ApplyAndSave();
+    }
+
+    private void RequestAdministrator_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_syncing) return;
+        _overlay.Settings.RequestAdministratorOnStartup = RequestAdministratorCheck.IsChecked == true;
         ApplyAndSave();
     }
 

@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Xml.Linq;
 using Chaos.NaCl;
@@ -238,6 +240,82 @@ using (var service = fixture.CreateService(elevated: true))
 }
 using (var fixture = new Fixture())
 {
+    var launches = 0;
+    using var service = fixture.CreateService(processLauncher: _ => { launches++; return true; });
+    await service.CheckAsync(); await service.DownloadAsync();
+    var plan = await service.PrepareInstallerLauncherAsync();
+    Check(plan is not null && launches == 0, "Preparing an opaque installer plan must not start a process.");
+    await service.StopAsync();
+    Check(await plan!.TryLaunchAsync() && launches == 1, "An ordinary-user plan must survive service shutdown and launch once through the injected launcher.");
+    Check(!await plan.TryLaunchAsync() && launches == 1 && plan.ErrorCode == "InstallerAlreadyStarted", "An installer plan must reject a second launch attempt.");
+}
+using (var fixture = new Fixture())
+{
+    var broker = new FakeDesktopBroker();
+    var directLaunches = 0;
+    using var service = fixture.CreateService(elevated: true, broker: broker,
+        processLauncher: _ => { directLaunches++; return true; });
+    await service.CheckAsync(); await service.DownloadAsync();
+    var plan = await service.PrepareInstallerLauncherAsync();
+    Check(plan is not null && broker.Launches == 0 && directLaunches == 0, "An elevated plan may be prepared only for the safe desktop broker, without launching.");
+    await service.StopAsync();
+    Check(await plan!.TryLaunchAsync() && broker.Launches == 1 && directLaunches == 0, "An elevated HUD must use the desktop broker exclusively after shutdown.");
+    Check(broker.AvailabilityChecks >= 2 && broker.LastFile is not null && File.ReadAllBytes(broker.LastFile).SequenceEqual(Fixture.Payload),
+        "Desktop availability and installer signature must be rechecked at handoff.");
+    Check(broker.LastArguments == "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER /GLIMHUDRESTART=1"
+        && broker.LastDirectory == fixture.Cache, "The broker must receive only constant installer switches and the verified separate executable path.");
+}
+using (var fixture = new Fixture())
+{
+    var broker = new FakeDesktopBroker { Available = false };
+    using var service = fixture.CreateService(elevated: true, broker: broker);
+    await service.CheckAsync(); await service.DownloadAsync();
+    Check(await service.PrepareInstallerLauncherAsync() is null && service.Snapshot.ErrorCode == "DesktopUnavailable" && broker.Launches == 0,
+        "Unsafe or missing desktop identity must fail before stopping the HUD or launching anything.");
+}
+foreach (var failure in new[] { "missing", "declined", "exception", "tampered" })
+{
+    using var fixture = new Fixture();
+    var broker = new FakeDesktopBroker();
+    var directLaunches = 0;
+    using var service = fixture.CreateService(elevated: true, broker: broker, processLauncher: _ => { directLaunches++; return true; });
+    await service.CheckAsync(); await service.DownloadAsync();
+    var plan = await service.PrepareInstallerLauncherAsync();
+    if (failure == "missing") broker.Available = false;
+    if (failure == "declined") broker.Succeeds = false;
+    if (failure == "exception") broker.Error = new COMException("Test-only broker rejection.");
+    if (failure == "tampered") File.WriteAllBytes(Directory.GetFiles(fixture.Cache, "*.exe").Single(), Fixture.Payload.Select(value => (byte)(value ^ 1)).ToArray());
+    await service.StopAsync();
+    var expected = failure == "missing" ? "DesktopUnavailable" : failure == "tampered" ? "InstallerSignature" : "InstallerLaunchFailed";
+    Check(plan is not null && !await plan.TryLaunchAsync() && plan.ErrorCode == expected && directLaunches == 0,
+        "Desktop/dispatch/signature failure must fail closed and never fall back to an elevated process launch.");
+    if (failure is "missing" or "tampered") Check(broker.Launches == 0, "A failed identity or signature recheck must never reach ShellExecute.");
+}
+{
+    var directLaunches = 0;
+    var start = new ProcessStartInfo("C:\\test-only\\signed-installer.exe");
+    var plan = new UpdateInstallerLauncher(start, () => true, requiresDesktopBroker: false, desktopBroker: null,
+        _ => { directLaunches++; return true; }, isElevated: () => true);
+    Check(!await plan.TryLaunchAsync() && directLaunches == 0 && plan.ErrorCode == "ElevatedInstall", "The generic direct-launch path must independently reject an elevated process.");
+}
+{
+    const string explorer = "C:\\Windows\\explorer.exe";
+    const string user = "S-1-5-21-1-2-3-1001";
+    var ordinaryDesktop = new DesktopProcessIdentity(123, 1, explorer, user, false);
+    Check(UnelevatedProcessLauncher.IsTrustedDesktop(ordinaryDesktop, 1, user, explorer), "The same-user/session medium-integrity system Explorer may broker an explicit installer action.");
+    foreach (var untrusted in new[] {
+        ordinaryDesktop with { ProcessId = 0 }, ordinaryDesktop with { SessionId = 2 },
+        ordinaryDesktop with { UserSid = "S-1-5-21-4-5-6-1002" }, ordinaryDesktop with { IsElevated = true },
+        ordinaryDesktop with { ExecutablePath = "C:\\Untrusted\\explorer.exe" }, ordinaryDesktop with { ExecutablePath = "explorer.exe" },
+        ordinaryDesktop with { ExecutablePath = "C:\\Windows\\cmd.exe" }, ordinaryDesktop with { IntegrityLevel = 0x1000 },
+        ordinaryDesktop with { IntegrityLevel = 0x3000 }, ordinaryDesktop with { IntegrityLevel = 0x4000 },
+        ordinaryDesktop with { UserSid = "" } })
+        Check(!UnelevatedProcessLauncher.IsTrustedDesktop(untrusted, 1, user, explorer), "Missing/wrong-user/session/elevated/non-system/low/high-integrity desktops must fail closed.");
+    Check(UnelevatedProcessLauncher.IsTrustedDesktop(ordinaryDesktop with { ExecutablePath = "c:\\WINDOWS\\explorer.exe" }, 1, user, explorer),
+        "Canonical Windows paths must compare without case sensitivity.");
+}
+using (var fixture = new Fixture())
+{
     Directory.CreateDirectory(fixture.Cache);
     Check(!AppUpdateService.HasInstallerMarker(fixture.Cache), "A portable directory without a marker must not self-update.");
     File.WriteAllText(Path.Combine(fixture.Cache, "installed.marker"), "something else");
@@ -271,8 +349,10 @@ sealed class Fixture : IDisposable
         });
         _http = new HttpClient(Handler);
     }
-    public AppUpdateService CreateService(string? key = null, bool installed = true, bool packaged = false, bool elevated = false)
-        => new(_http, key ?? TestPublicKey, new Version(0, 7, 0), Cache, installed, packaged, isElevated: elevated);
+    public AppUpdateService CreateService(string? key = null, bool installed = true, bool packaged = false, bool elevated = false,
+        IUnelevatedProcessLauncher? broker = null, Func<ProcessStartInfo, bool>? processLauncher = null)
+        => new(_http, key ?? TestPublicKey, new Version(0, 7, 0), Cache, installed, packaged, isElevated: elevated,
+            desktopBroker: broker, processLauncher: processLauncher ?? (_ => throw new InvalidOperationException("Real process execution is forbidden in updater checks.")));
     public static string Sign(byte[] bytes) => Convert.ToBase64String(Ed25519.Sign(bytes, TestPrivateKey));
     public static byte[] BuildFeed(string version = "0.7.1", string? url = null, long? length = null, string? signature = null,
         string? channel = null, string os = "windows")
@@ -316,4 +396,22 @@ sealed class FakeHandler(Func<HttpRequestMessage, HttpContent> content) : HttpMe
 sealed class NonSeekableStream(byte[] bytes) : MemoryStream(bytes, writable: false)
 {
     public override bool CanSeek => false;
+}
+sealed class FakeDesktopBroker : IUnelevatedProcessLauncher
+{
+    public bool Available { get; set; } = true;
+    public bool Succeeds { get; set; } = true;
+    public Exception? Error { get; set; }
+    public int AvailabilityChecks { get; private set; }
+    public int Launches { get; private set; }
+    public string? LastFile { get; private set; }
+    public string? LastArguments { get; private set; }
+    public string? LastDirectory { get; private set; }
+    public bool IsAvailable() { AvailabilityChecks++; return Available; }
+    public Task<bool> TryLaunchAsync(string executablePath, string arguments, string workingDirectory)
+    {
+        Launches++; LastFile = executablePath; LastArguments = arguments; LastDirectory = workingDirectory;
+        if (Error is not null) throw Error;
+        return Task.FromResult(Succeeds);
+    }
 }

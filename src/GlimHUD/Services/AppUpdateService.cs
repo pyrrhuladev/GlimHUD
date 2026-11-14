@@ -37,6 +37,8 @@ public sealed class AppUpdateService : IDisposable
     private readonly string _cacheDirectory;
     private readonly Version _currentVersion;
     private readonly bool _isElevated;
+    private readonly IUnelevatedProcessLauncher? _desktopBroker;
+    private readonly Func<ProcessStartInfo, bool> _processLauncher;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _shutdown = new();
     private UpdateSnapshot _snapshot;
@@ -51,16 +53,19 @@ public sealed class AppUpdateService : IDisposable
         typeof(AppUpdateService).Assembly.GetName().Version ?? new Version(0, 0, 0),
         Path.Combine(SettingsStore.DirectoryPath, "Updates"),
         HasInstallerMarker(AppContext.BaseDirectory), IsPackagedProcess(), ownsHttp: true,
-        isElevated: AppRestartService.IsAdministrator) { }
+        isElevated: AppRestartService.IsAdministrator, desktopBroker: new UnelevatedProcessLauncher()) { }
 
     internal AppUpdateService(HttpClient http, string? publicKey, Version currentVersion,
-        string cacheDirectory, bool isInstalled, bool isPackaged = false, bool ownsHttp = false, bool isElevated = false)
+        string cacheDirectory, bool isInstalled, bool isPackaged = false, bool ownsHttp = false, bool isElevated = false,
+        IUnelevatedProcessLauncher? desktopBroker = null, Func<ProcessStartInfo, bool>? processLauncher = null)
     {
         _http = http;
         _ownsHttp = ownsHttp;
         _cacheDirectory = Path.GetFullPath(cacheDirectory);
         _currentVersion = NormalizeVersion(currentVersion);
         _isElevated = isElevated;
+        _desktopBroker = desktopBroker;
+        _processLauncher = processLauncher ?? UpdateInstallerLauncher.StartNormally;
         var state = isPackaged ? UpdateState.Disabled : isInstalled ? UpdateState.Ready : UpdateState.Portable;
         _snapshot = new(state, _currentVersion.ToString(3), IsInstalled: isInstalled, IsPackaged: isPackaged);
         try
@@ -161,24 +166,64 @@ public sealed class AppUpdateService : IDisposable
     public Task<ProcessStartInfo?> PrepareInstallAsync(CancellationToken cancellationToken = default)
         => Task.Run(() => TryCreateInstallerStartInfo(out var start) ? start : null, cancellationToken);
 
+    /// <summary>
+    /// Creates an opaque launch plan. Unlike the legacy direct-start API, this
+    /// supports an elevated HUD only through a validated ordinary desktop broker.
+    /// The captured candidate/verifier survives service shutdown and rechecks the
+    /// installer immediately before the explicit launch action.
+    /// </summary>
+    public Task<UpdateInstallerLauncher?> PrepareInstallerLauncherAsync(CancellationToken cancellationToken = default)
+        => Task.Run(() =>
+        {
+            if (_disposed || Snapshot.State != UpdateState.Downloaded || _candidate is null || _verifiedPath is null || _verifier is null)
+                return null;
+            var candidate = _candidate;
+            var path = _verifiedPath;
+            var verifier = _verifier;
+            var cache = _cacheDirectory;
+            var current = _currentVersion;
+            bool Verify() => ValidateInstaller(path, cache, candidate, current, verifier);
+            if (!Verify()) { SetState(UpdateState.Failed, error: "InstallerSignature"); return null; }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_isElevated && (_desktopBroker is null || !_desktopBroker.IsAvailable()))
+            { SetState(UpdateState.Failed, error: "DesktopUnavailable"); return null; }
+            return new UpdateInstallerLauncher(CreateInstallerStartInfo(path, cache), Verify,
+                _isElevated, _desktopBroker, _processLauncher);
+        }, cancellationToken);
+
     public bool TryCreateInstallerStartInfo(out ProcessStartInfo? start)
     {
         start = null;
         if (_disposed || Snapshot.State != UpdateState.Downloaded || _candidate is null || _verifiedPath is null || _verifier is null) return false;
-        if (_isElevated) { SetState(UpdateState.Failed, error: "ElevatedInstall"); return false; }
+        if (_isElevated || AppRestartService.IsAdministrator) { SetState(UpdateState.Failed, error: "ElevatedInstall"); return false; }
         try
         {
-            var file = new FileInfo(_verifiedPath);
-            if (!file.Exists || file.Length != _candidate.Length || _candidate.Version <= _currentVersion
-                || !file.FullName.StartsWith(_cacheDirectory.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                || _verifier.VerifySignatureOfFile(_candidate.Signature, file.FullName) != ValidationResult.Valid)
+            if (!ValidateInstaller(_verifiedPath, _cacheDirectory, _candidate, _currentVersion, _verifier))
                 throw new UpdateValidationException("InstallerSignature");
-            start = new ProcessStartInfo(file.FullName) { UseShellExecute = true, WorkingDirectory = _cacheDirectory };
-            foreach (var argument in new[] { "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER", "/GLIMHUDRESTART=1" }) start.ArgumentList.Add(argument);
+            start = CreateInstallerStartInfo(_verifiedPath, _cacheDirectory);
             return true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or UpdateValidationException or InvalidOperationException)
         { SetState(UpdateState.Failed, error: "InstallerSignature"); return false; }
+    }
+
+    private static bool ValidateInstaller(string path, string cacheDirectory, UpdateCandidate candidate, Version currentVersion, Ed25519Checker verifier)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+            return file.Exists && file.Length == candidate.Length && candidate.Version > currentVersion
+                && file.FullName.StartsWith(cacheDirectory.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                && verifier.VerifySignatureOfFile(candidate.Signature, file.FullName) == ValidationResult.Valid;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        { return false; }
+    }
+    private static ProcessStartInfo CreateInstallerStartInfo(string path, string cacheDirectory)
+    {
+        var start = new ProcessStartInfo(path) { UseShellExecute = true, WorkingDirectory = cacheDirectory };
+        foreach (var argument in new[] { "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER", "/GLIMHUDRESTART=1" }) start.ArgumentList.Add(argument);
+        return start;
     }
 
     private async Task<byte[]> ReadSmallAsync(Uri url, int maximum, CancellationToken token)

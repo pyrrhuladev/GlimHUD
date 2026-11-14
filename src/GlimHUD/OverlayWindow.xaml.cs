@@ -287,7 +287,7 @@ public partial class OverlayWindow : Window
         if (PanelSurface is null) return;
         // Live glow has its own always-click-through HWND; the panel's drag area stays unchanged.
         ScaledRoot.Margin = new Thickness(!_initializeServices && Settings.GlowEnabled
-            ? Math.Ceiling(26 * Math.Clamp(Settings.Scale, .65, 1.5)) + 2 : 5);
+            ? Math.Ceiling(26 * Math.Clamp(Settings.Scale, .65, 1.5)) + 2 : Settings.CompactMode ? 2 : 5);
         UpdateTrayText();
         _accentTheme.Apply(Settings.UseWindowsAccent, Settings.CustomAccentColor);
         _accentTheme.ApplyOverlayColors(Settings.TextColor, Settings.BackgroundColor, Settings.BackgroundOpacity);
@@ -304,6 +304,7 @@ public partial class OverlayWindow : Window
             Settings.ShowFps = true;
             FpsSection.Visibility = Visibility.Visible;
         }
+        ApplyCompactLayout();
         UpdateModuleDividers();
         _telemetry.PreferredGpuIdentifier = Settings.GpuIdentifier;
         var networkSelectionChanged = !string.Equals(_network.PreferredAdapterId, Settings.NetworkAdapterId, StringComparison.OrdinalIgnoreCase);
@@ -335,6 +336,92 @@ public partial class OverlayWindow : Window
         }
         ConfigureGlow();
         ConfigureAutomaticUpdates();
+    }
+
+    private void ApplyCompactLayout()
+    {
+        var compact = Settings.CompactMode;
+        PanelContent.Height = compact ? 24 : 50;
+        PanelContent.Margin = compact ? new Thickness(12, 2, 12, 2) : new Thickness(24, 8, 24, 8);
+        PanelSurface.CornerRadius = new CornerRadius(compact ? 15 : 34);
+        ArtworkFrame.Visibility = Visible(!compact);
+        CpuIcon.Visibility = GpuIcon.Visibility = RamIcon.Visibility = NetworkIcon.Visibility = Visible(!compact);
+        VolumeSlider.Visibility = MuteButton.Visibility = VolumeControlsDivider.Visibility = Visible(!compact);
+
+        TrackInfo.Width = compact ? 126 : 145;
+        TrackInfo.Margin = compact ? new Thickness(0, 0, 5, 0) : new Thickness(12, 0, 9, 0);
+        TrackTitle.FontSize = compact ? 10.5 : 14;
+        TrackTitle.LineHeight = compact ? 12 : double.NaN;
+        TrackTitle.LineStackingStrategy = compact ? LineStackingStrategy.BlockLineHeight : LineStackingStrategy.MaxHeight;
+        TrackArtist.FontSize = compact ? 8.5 : 11;
+        TrackArtist.LineHeight = compact ? 10 : double.NaN;
+        TrackArtist.LineStackingStrategy = compact ? LineStackingStrategy.BlockLineHeight : LineStackingStrategy.MaxHeight;
+        TrackArtist.Margin = new Thickness(0, compact ? 1 : 4, 0, 0);
+        foreach (var button in new[] { PreviousButton, NextButton })
+        {
+            button.Width = compact ? 22 : 30;
+            button.Height = compact ? 24 : 34;
+            button.Padding = new Thickness(compact ? 4 : 5);
+        }
+        PlayButton.Width = compact ? 26 : 40;
+        PlayButton.Height = compact ? 24 : 40;
+        PlaybackCircle.Width = PlaybackCircle.Height = compact ? 20 : 32;
+        PlaybackCircle.CornerRadius = new CornerRadius(compact ? 10 : 16);
+        PlaybackGlyph.Width = compact ? 9 : 11;
+        PlaybackGlyph.Height = compact ? 11 : 13;
+        VolumeValue.Width = compact ? 27 : 33;
+        VolumeValue.FontSize = compact ? 9 : 11;
+        VolumeValue.Margin = compact ? new Thickness(2, 0, 0, 0) : new Thickness(0);
+
+        FpsContent.Width = compact ? 37 : 57;
+        CpuContent.Width = GpuContent.Width = compact ? 66 : 90;
+        RamContent.Width = compact ? 106 : 134;
+        foreach (var label in new[] { FpsLabel, CpuLabel, GpuLabel, RamLabel })
+        {
+            label.FontSize = compact ? 7 : 10;
+            label.LineHeight = compact ? 8 : double.NaN;
+            label.LineStackingStrategy = compact ? LineStackingStrategy.BlockLineHeight : LineStackingStrategy.MaxHeight;
+            label.Margin = new Thickness(0, 0, 0, compact ? 0 : 2);
+        }
+        FpsValue.FontSize = compact ? 14 : 28;
+        FpsValue.LineHeight = compact ? 16 : 29;
+        FpsValue.LineStackingStrategy = compact ? LineStackingStrategy.BlockLineHeight : LineStackingStrategy.MaxHeight;
+        foreach (var value in new[] { CpuValue, GpuValue, RamValue })
+        {
+            value.FontSize = compact ? 13 : 22;
+            value.Width = compact ? 35 : 57;
+            value.LineHeight = compact ? 16 : double.NaN;
+            value.LineStackingStrategy = compact ? LineStackingStrategy.BlockLineHeight : LineStackingStrategy.MaxHeight;
+        }
+        foreach (var temperature in new[] { CpuTemperature, GpuTemperature })
+        {
+            temperature.FontSize = compact ? 9 : 11;
+            temperature.Width = compact ? 31 : 33;
+            temperature.Margin = new Thickness(0, 0, 0, compact ? 0 : 5);
+        }
+        RamMemory.FontSize = compact ? 8.5 : 10;
+        RamMemory.Width = compact ? 71 : 77;
+        RamMemory.Margin = new Thickness(0, 0, 0, compact ? 0 : 5);
+        foreach (var divider in new[] { MusicDivider, FpsDivider, CpuDivider, GpuDivider, RamDivider })
+        {
+            divider.Height = compact ? 14 : 32;
+            divider.Margin = new Thickness(compact ? 7 : 13, 0, compact ? 7 : 13, 0);
+        }
+
+        NetworkContent.Orientation = compact ? Orientation.Horizontal : Orientation.Vertical;
+        NetworkContent.Width = compact ? 114 : 99;
+        NetworkLabel.FontSize = compact ? 7 : 10;
+        NetworkLabel.Margin = compact ? new Thickness(0, 0, 5, 0) : new Thickness(0, 0, 0, 2);
+        NetworkLabel.VerticalAlignment = compact ? VerticalAlignment.Center : VerticalAlignment.Top;
+        if (compact) NetworkLabel.Text = L10n.Text("NET", "СЕТЬ");
+        else NetworkLabel.SetResourceReference(TextBlock.TextProperty, "Loc.NetworkModule");
+        foreach (var value in new[] { NetworkDownloadValue, NetworkUploadValue, NetworkDownloadDirection, NetworkUploadDirection })
+        {
+            value.FontSize = compact ? 9.5 : 13;
+            value.LineHeight = compact ? 11 : double.NaN;
+            value.LineStackingStrategy = compact ? LineStackingStrategy.BlockLineHeight : LineStackingStrategy.MaxHeight;
+        }
+        NetworkDownloadDirection.Width = NetworkUploadDirection.Width = compact ? 10 : 13;
     }
 
     private bool CanCheckAutomatically => _initializeServices && _allowUpdateChecks && _loaded
@@ -382,21 +469,22 @@ public partial class OverlayWindow : Window
         _installingUpdate = true;
         try
         {
-            var start = await AppUpdates.PrepareInstallAsync(_shutdown.Token);
-            if (start is null) throw new InvalidOperationException("The update could not be verified for installation.");
+            var installer = await AppUpdates.PrepareInstallerLauncherAsync(_shutdown.Token);
+            if (installer is null) throw new InvalidOperationException("The update could not be prepared for installation.");
             SaveSettings();
             _settingsWindow?.Close();
             await StopAsync();
             try
             {
                 if (System.Windows.Application.Current is App app) app.ReleaseSingleInstanceForUpdate();
-                using var process = Process.Start(start);
-                if (process is null) throw new InvalidOperationException("Windows did not start the installer.");
+                if (!await installer.TryLaunchAsync())
+                    throw new InvalidOperationException($"Windows could not hand off the verified installer: {installer.ErrorCode}.");
             }
             catch (Exception error)
             {
                 App.LogError(error);
-                System.Windows.MessageBox.Show(L10n.Text(
+                var desktopFailure = installer.ErrorCode is "DesktopUnavailable" or "InstallerLaunchFailed" or "ElevatedInstall";
+                System.Windows.MessageBox.Show(desktopFailure ? (string)FindResource("Loc.UpdateDesktopUnavailable") : L10n.Text(
                     "The installer could not start. Please restart GlimHUD and try again.",
                     "Не удалось запустить установщик. Перезапустите GlimHUD и повторите попытку."),
                     "GlimHUD", MessageBoxButton.OK, MessageBoxImage.Warning);

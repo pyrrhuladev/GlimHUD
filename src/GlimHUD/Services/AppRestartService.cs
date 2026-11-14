@@ -7,10 +7,11 @@ using System.Security.Principal;
 
 namespace GlimHUD.Services;
 
-/// <summary>Requests elevation only from an explicit user action, without changing Windows policy.</summary>
+/// <summary>Requests ordinary Windows consent for startup preference or manual restart; never changes Windows policy.</summary>
 internal static class AppRestartService
 {
     internal const string RestartArgument = "--restart-from";
+    internal const string SkipAdministratorRequestArgument = "--skip-admin-request";
     private const int UserCancelled = 1223;
     private const int NoPackageIdentity = 15700;
 
@@ -42,7 +43,7 @@ internal static class AppRestartService
         && string.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase)
         && !string.Equals(Path.GetFileName(path), "dotnet.exe", StringComparison.OrdinalIgnoreCase);
 
-    internal static ProcessStartInfo CreateStartInfo(string executablePath, int parentProcessId)
+    internal static ProcessStartInfo CreateStartInfo(string executablePath, int parentProcessId, bool openSettings = true)
     {
         if (!IsRestartableExecutable(executablePath))
             throw new ArgumentException("Restart requires the deployed application executable.", nameof(executablePath));
@@ -57,8 +58,48 @@ internal static class AppRestartService
         };
         start.ArgumentList.Add(RestartArgument);
         start.ArgumentList.Add(parentProcessId.ToString(CultureInfo.InvariantCulture));
-        start.ArgumentList.Add("--settings");
+        start.ArgumentList.Add(SkipAdministratorRequestArgument);
+        if (openSettings) start.ArgumentList.Add("--settings");
         return start;
+    }
+
+    internal static bool ShouldRequestStartupElevation(bool enabled, IReadOnlyList<string> arguments,
+        string? executablePath, bool isAdministrator, bool isPackaged)
+        => enabled && !isAdministrator && !isPackaged && IsRestartableExecutable(executablePath)
+            && !arguments.Any(argument => string.Equals(argument, SkipAdministratorRequestArgument, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(argument, RestartArgument, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(argument, "--render-preview", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(argument, "--smoke-test", StringComparison.OrdinalIgnoreCase));
+
+    internal static StartupElevationOutcome RequestStartupElevation(bool enabled, IReadOnlyList<string> arguments,
+        Action<Exception>? reportFailure = null)
+        => RequestStartupElevation(enabled, arguments, Environment.ProcessPath, Environment.ProcessId,
+            IsAdministrator, IsPackaged, start => Process.Start(start), reportFailure);
+
+    // Runtime state and the launcher are injected so checks never open a UAC prompt.
+    internal static StartupElevationOutcome RequestStartupElevation(bool enabled, IReadOnlyList<string> arguments,
+        string? executablePath, int parentProcessId, bool isAdministrator, bool isPackaged,
+        Func<ProcessStartInfo, Process?> launcher, Action<Exception>? reportFailure = null)
+    {
+        if (!ShouldRequestStartupElevation(enabled, arguments, executablePath, isAdministrator, isPackaged))
+            return StartupElevationOutcome.NotRequested;
+        try
+        {
+            var openSettings = arguments.Contains("--settings", StringComparer.OrdinalIgnoreCase);
+            using var process = launcher(CreateStartInfo(executablePath!, parentProcessId, openSettings));
+            if (process is null) throw new InvalidOperationException("Windows did not start the application.");
+            return StartupElevationOutcome.RestartStarted;
+        }
+        catch (Win32Exception error) when (error.NativeErrorCode == UserCancelled)
+        {
+            return StartupElevationOutcome.Cancelled;
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException or IOException
+            or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException or ArgumentException)
+        {
+            reportFailure?.Invoke(error);
+            return StartupElevationOutcome.Failed;
+        }
     }
 
     internal static bool RequestElevation() => RequestElevation(
@@ -118,3 +159,5 @@ internal static class AppRestartService
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetCurrentPackageFullName(ref uint packageFullNameLength, IntPtr packageFullName);
 }
+
+internal enum StartupElevationOutcome { NotRequested, RestartStarted, Cancelled, Failed }

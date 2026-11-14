@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0 - 2026-11-14
+
+### Added
+
+- Optional compact layout with smaller text and spacing and hidden album artwork, section icons, mute button, and volume slider. Playback controls, volume percentage, selected metrics, optional volume scrolling, and global shortcuts remain available.
+- A saved administrator-at-startup preference, enabled by default for unpackaged copies. Windows UAC approval starts an elevated instance; cancellation continues with normal permissions. Packaged and diagnostic launches skip the automatic request.
+
+### Changed
+
+- Kept the regular layout selectable and restored when compact mode is disabled.
+- Documented that elevation can help FPS capture and hardware sensor access, while music controls and network readings remain available without it.
+- User-requested updates from an elevated HUD use a verified, non-elevated Explorer desktop for the same account. Unsupported desktop or cross-account cases stop safely without an elevated installer fallback, and the installer signature is checked again before handoff.
+
 ## 0.8.1 - 2026-11-14
 
 ### Fixed

@@ -55,10 +55,29 @@ public partial class App : System.Windows.Application
             Shutdown(1);
             return;
         }
-        _instance = new Mutex(true, "Local\\GlimHUD.Desktop", out var created);
+        bool created;
+        try { _instance = new Mutex(true, "Local\\GlimHUD.Desktop", out created); }
+        catch (UnauthorizedAccessException)
+        {
+            // An existing instance may restrict its mutex. Never bypass that
+            // boundary by launching a duplicate or another consent request.
+            Shutdown();
+            return;
+        }
         if (!created) { Shutdown(); return; }
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += (_, args) => LogError(args.ExceptionObject as Exception);
+        // Diagnostics above never enter this path. An accepted child waits for
+        // this process to exit before claiming the same instance mutex.
+        var startupSettings = Services.SettingsStore.Load();
+        if (Services.AppRestartService.RequestStartupElevation(startupSettings.RequestAdministratorOnStartup,
+                e.Args, LogError) == Services.StartupElevationOutcome.RestartStarted)
+        {
+            Shutdown(0);
+            return;
+        }
+        // A declined or unavailable consent request continues normally; sensor/FPS
+        // availability and the existing manual recovery action explain access.
         var overlay = new OverlayWindow();
         MainWindow = overlay;
         overlay.Show();
@@ -74,13 +93,14 @@ public partial class App : System.Windows.Application
         overlay.Settings.Scale = 1;
         overlay.Settings.TextColor = "#F2F8FC";
         overlay.Settings.BackgroundColor = "#07121D";
-        var networkPreview = variant is "network" or "network-neon" or "network-only" or "network-idle";
-        var neonPreview = variant is "neon" or "neon-low" or "neon-pulse" or "compact-neon" or "neon-light" or "network-neon";
+        overlay.Settings.CompactMode = variant is "slim" or "slim-neon" or "slim-network" or "slim-stress" or "slim-no-music";
+        var networkPreview = variant is "network" or "network-neon" or "network-only" or "network-idle" or "slim-network" or "slim-stress";
+        var neonPreview = variant is "neon" or "neon-low" or "neon-pulse" or "compact-neon" or "neon-light" or "network-neon" or "slim-neon";
         overlay.Settings.GlowEnabled = neonPreview || variant is "glow" or "glow-low" or "glow-peak" or "compact-glow" or "glow-light";
         overlay.Settings.GlowStyle = neonPreview ? Models.GlowStyles.NeonFlow : Models.GlowStyles.RainbowWave;
         overlay.Settings.GlowReactive = true;
         overlay.Settings.GlowIntensity = .75;
-        overlay.Settings.ShowMusic = variant is not ("compact" or "compact-light" or "compact-glow" or "compact-neon");
+        overlay.Settings.ShowMusic = variant is not ("compact" or "compact-light" or "compact-glow" or "compact-neon" or "slim-no-music");
         overlay.Settings.ShowFps = overlay.Settings.ShowCpu = overlay.Settings.ShowGpu = overlay.Settings.ShowRam = true;
         overlay.Settings.ShowNetwork = networkPreview;
         if (variant is "fps-only" or "cpu-only" or "ram-only" or "music-only" or "network-only")
@@ -120,6 +140,17 @@ public partial class App : System.Windows.Application
         overlay.VolumeSlider.Value = 60;
         overlay.VolumeValue.Text = "60%";
         if (networkPreview) overlay.SetNetworkPreview(CreateNetworkPreview(variant == "network-idle"));
+        if (variant == "slim-stress")
+        {
+            overlay.TrackTitle.Text = "A very long track title that must remain inside its column";
+            overlay.TrackArtist.Text = "An artist with a similarly long name";
+            overlay.FpsValue.Text = "999";
+            overlay.CpuValue.Text = overlay.GpuValue.Text = overlay.RamValue.Text = "100%";
+            overlay.CpuTemperature.Text = overlay.GpuTemperature.Text = "100°C";
+            overlay.RamMemory.Text = L10n.Text("{0:0.#}/{1:0.#} GB", "{0:0.#}/{1:0.#} ГБ", 128, 128);
+            overlay.VolumeSlider.Value = 100;
+            overlay.VolumeValue.Text = "100%";
+        }
         // A square, high-contrast fixture exercises the real decoder and rounded clip.
         var coverDrawing = new DrawingVisual();
         using (var drawing = coverDrawing.RenderOpen())
@@ -282,6 +313,7 @@ public partial class App : System.Windows.Application
             var glowPresentation = CheckGlowPresentation(overlay, settings);
             var contextMenuPresentation = await CheckContextMenuPresentationAsync(overlay, settings);
             var networkPresentation = CheckNetworkPresentation();
+            var compactPresentation = CheckCompactPresentation();
             settings.Close();
             overlay.Settings.Locked = true;
             overlay.ApplySettings();
@@ -314,6 +346,7 @@ public partial class App : System.Windows.Application
                 GlowPresentation = glowPresentation,
                 ContextMenuPresentation = contextMenuPresentation,
                 NetworkPresentation = networkPresentation,
+                CompactPresentation = compactPresentation,
                 Network = new
                 {
                     Status = overlay.NetworkSnapshot?.Status.ToString(),
@@ -336,6 +369,73 @@ public partial class App : System.Windows.Application
             await overlay.StopAsync();
             overlay.Close();
         }
+    }
+
+    private static bool CheckCompactPresentation()
+    {
+        // Design-only controls: never register hooks, write audio volume or ask for UAC.
+        var preview = new OverlayWindow(initializeServices: false);
+        SettingsWindow? details = null;
+        try
+        {
+            preview.Settings.CompactMode = false;
+            preview.Settings.GlowEnabled = false;
+            preview.Settings.Scale = 1;
+            preview.Settings.ScrollMusicVolume = true;
+            preview.Settings.ShowMusic = preview.Settings.ShowFps = preview.Settings.ShowCpu
+                = preview.Settings.ShowGpu = preview.Settings.ShowRam = preview.Settings.ShowNetwork = true;
+            preview.ApplySettings();
+            preview.SetNetworkPreview(CreateNetworkPreview());
+            var content = (FrameworkElement)preview.Content;
+            var regular = RenderElement(content);
+            var regularSize = content.DesiredSize;
+            details = new SettingsWindow(preview);
+            for (var pass = 0; pass < 2; pass++)
+            {
+                details.CompactModeCheck.IsChecked = true;
+                preview.SaveSettings(); // Settings normally debounce writes for 450 ms.
+                RenderElement(content);
+                if (!preview.Settings.CompactMode || Services.SettingsStore.Load().CompactMode != true
+                    || preview.PanelSurface.ActualHeight != 30 || content.DesiredSize.Width >= regularSize.Width * .7
+                    || content.DesiredSize.Height >= regularSize.Height * .6
+                    || preview.ArtworkFrame.Visibility != Visibility.Collapsed
+                    || preview.CpuIcon.Visibility != Visibility.Collapsed || preview.GpuIcon.Visibility != Visibility.Collapsed
+                    || preview.RamIcon.Visibility != Visibility.Collapsed || preview.NetworkIcon.Visibility != Visibility.Collapsed
+                    || preview.VolumeSlider.Visibility != Visibility.Collapsed || preview.MuteButton.Visibility != Visibility.Collapsed
+                    || preview.PlayButton.Visibility != Visibility.Visible || !preview.Settings.ScrollMusicVolume
+                    || preview.MusicSection.ActualWidth <= 0)
+                    throw new InvalidOperationException("Compact layout did not reduce the panel or retain its music control area.");
+                var circleBounds = preview.PlaybackCircle.TransformToAncestor(preview.PlayButton)
+                    .TransformBounds(new Rect(preview.PlaybackCircle.RenderSize));
+                if (!new Rect(preview.PlayButton.RenderSize).Contains(circleBounds)
+                    || preview.PlaybackGlyph.ActualHeight > preview.PlaybackCircle.ActualHeight - 2)
+                    throw new InvalidOperationException("Compact playback controls are clipped.");
+                // Changing the preference only persists it; it never invokes a launcher.
+                details.RequestAdministratorCheck.IsChecked = false;
+                preview.SaveSettings();
+                if (Services.SettingsStore.Load().RequestAdministratorOnStartup)
+                    throw new InvalidOperationException("The administrator startup opt-out did not persist.");
+                details.RequestAdministratorCheck.IsChecked = true;
+                preview.SaveSettings();
+                if (!Services.SettingsStore.Load().RequestAdministratorOnStartup)
+                    throw new InvalidOperationException("The administrator startup preference did not persist.");
+                details.CompactModeCheck.IsChecked = false;
+                var restored = RenderElement(content);
+                if (content.DesiredSize != regularSize || preview.ArtworkFrame.Visibility != Visibility.Visible
+                    || preview.VolumeSlider.Visibility != Visibility.Visible || preview.CpuIcon.Visibility != Visibility.Visible
+                    || preview.PanelContent.Height != 50 || preview.NetworkContent.Orientation != Orientation.Vertical)
+                    throw new InvalidOperationException("The regular layout did not restore after compact mode.");
+                var stride = regular.PixelWidth * 4;
+                var expected = new byte[stride * regular.PixelHeight];
+                var actual = new byte[expected.Length];
+                regular.CopyPixels(expected, stride, 0);
+                restored.CopyPixels(actual, stride, 0);
+                if (!expected.AsSpan().SequenceEqual(actual))
+                    throw new InvalidOperationException("A compact-mode round trip changed the regular presentation.");
+            }
+            return true;
+        }
+        finally { details?.Close(); preview.Close(); }
     }
 
     private static bool CheckNetworkPresentation()

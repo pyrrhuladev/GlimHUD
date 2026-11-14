@@ -36,6 +36,8 @@ try
     var old = SettingsStore.Load();
     Check(old.Language == "en", "Legacy settings default to English.");
     Check(old.CheckForUpdates, "Legacy settings enable automatic update checks by default.");
+    Check(!old.CompactMode && old.RequestAdministratorOnStartup,
+        "Legacy settings retain the regular layout and enable the requested administrator prompt by default.");
     Check(old.SnapToGrid, "Legacy settings enable the alignment grid.");
     Check(old.TextColor == "#F2F8FC" && old.BackgroundColor == "#07121D", "Legacy settings retain the original text and background colors.");
     Check(!old.ShowMusic && old.Scale == 1.1, "Legacy settings keep existing player visibility and scale.");
@@ -56,6 +58,8 @@ try
     old.ScrollMusicVolume = false;
     old.Language = "ru";
     old.CheckForUpdates = false;
+    old.CompactMode = true;
+    old.RequestAdministratorOnStartup = false;
     old.SnapToGrid = false;
     old.TextColor = "#000000";
     old.BackgroundColor = "#F8EEDC";
@@ -71,6 +75,8 @@ try
     var saved = SettingsStore.Load();
     Check(saved.Language == "ru", "Russian language survives a restart.");
     Check(!saved.CheckForUpdates, "Disabling automatic update checks survives a restart.");
+    Check(saved.CompactMode && !saved.RequestAdministratorOnStartup,
+        "Compact mode and opting out of startup administrator requests survive a restart.");
     Check(!saved.SnapToGrid, "Disabling the alignment grid survives a restart.");
     Check(saved.TextColor == "#000000" && saved.BackgroundColor == "#F8EEDC", "Text and background colors survive a restart independently.");
     Check(saved.GlowEnabled && !saved.GlowReactive && saved.GlowIntensity == 0.82,
@@ -83,11 +89,16 @@ try
     Check(saved.GameExecutablePaths.Count == 1, "Duplicate game paths are normalized case-insensitively.");
     saved.GlowStyle = GlowStyles.RainbowWave;
     saved.CheckForUpdates = true;
+    saved.CompactMode = false;
+    saved.RequestAdministratorOnStartup = true;
     saved.ShowNetwork = false;
     saved.NetworkAdapterId = null;
     SettingsStore.Save(saved);
     Check(SettingsStore.Load().GlowStyle == GlowStyles.RainbowWave, "Switching back to Rainbow Wave survives a restart.");
     Check(SettingsStore.Load().CheckForUpdates, "Re-enabling automatic update checks survives a restart.");
+    var restoredLayout = SettingsStore.Load();
+    Check(!restoredLayout.CompactMode && restoredLayout.RequestAdministratorOnStartup,
+        "Returning to regular layout and re-enabling startup administrator requests survive a restart.");
     var automaticNetwork = SettingsStore.Load();
     Check(!automaticNetwork.ShowNetwork && automaticNetwork.NetworkAdapterId is null,
         "Hiding the network module and returning to automatic adapter selection survive a restart.");
@@ -98,6 +109,10 @@ try
     File.WriteAllText(SettingsStore.FilePath, "{\"NetworkAdapterId\":\" missing-adapter \"}");
     Check(SettingsStore.Load().NetworkAdapterId == "missing-adapter",
         "An explicit unavailable adapter ID is preserved after trimming so selection does not silently switch.");
+    File.WriteAllText(SettingsStore.FilePath, "{\"CompactMode\":true,\"RequestAdministratorOnStartup\":false,\"GlowIntensity\":2}");
+    var normalizedPreferences = SettingsStore.Load();
+    Check(normalizedPreferences.CompactMode && !normalizedPreferences.RequestAdministratorOnStartup && normalizedPreferences.GlowIntensity == 1,
+        "Normalizing an unrelated appearance value preserves compact layout and the administrator opt-out.");
     foreach (var unsupportedStyle in new string?[] { null, "future-style", "" })
     {
         File.WriteAllText(SettingsStore.FilePath, JsonSerializer.Serialize(new

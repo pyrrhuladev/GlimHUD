@@ -4,6 +4,8 @@ public sealed class AppSettings
 {
     public string Language { get; set; } = "en";
     public bool CheckForUpdates { get; set; } = true;
+    public bool RequestAdministratorOnStartup { get; set; } = true;
+    public bool CompactMode { get; set; }
     public double BackgroundOpacity { get; set; } = 0.30;
     public string TextColor { get; set; } = "#F2F8FC";
     public string BackgroundColor { get; set; } = "#07121D";

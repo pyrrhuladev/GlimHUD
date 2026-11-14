@@ -13,6 +13,7 @@ A transparent Windows overlay for music controls, FPS, CPU, GPU, memory, and net
 ## Features
 
 - Compact, movable overlay with a translucent background and readable controls.
+- Optional compact layout with smaller text and spacing, hidden artwork and section icons; the regular layout remains available.
 - Current track, artwork, previous/play/pause/next controls through Windows media sessions. Supports compatible players, including Yandex Music.
 - Per-application music volume through WASAPI, with optional scrolling over the player area. It does not fall back to changing the system master volume.
 - Presented FPS through PresentMon, CPU/GPU load and available temperatures, and physical memory usage.
@@ -33,6 +34,10 @@ Download the [Windows x64 installer](https://github.com/pyrrhuladev/GlimHUD/rele
 For a portable copy, download [GlimHUD-win-x64.zip](https://github.com/pyrrhuladev/GlimHUD/releases/latest/download/GlimHUD-win-x64.zip), extract the complete ZIP, and start `GlimHUD.exe`. Keep all extracted files together. Additional builds and checksums are available in [GitHub Releases](https://github.com/pyrrhuladev/GlimHUD/releases). Framework-dependent source builds require the [.NET 10 Desktop Runtime for x64](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 On the first launch, position the unlocked overlay, then use the tray menu or Settings to adjust its appearance and data sources.
+
+**Request administrator access at startup** is enabled by default for unpackaged copies. GlimHUD asks Windows for elevation through UAC; approving restarts it with administrator access, while cancelling keeps it running normally. Disable this option in Settings to use normal launches. An already elevated process does not request elevation again. Administrator access can help with FPS capture and some hardware sensors, but does not guarantee every reading. Music controls and network counters do not require it. Packaged and diagnostic launches do not use this automatic request.
+
+**Compact layout** is optional and saved in Settings. It reduces text sizes and spacing and hides album artwork, section icons, the mute button, and the volume slider. Previous/play/next controls, volume percentage, and selected metrics remain visible. Adjust volume by scrolling over the player if that option is enabled, or use the global volume/mute shortcuts. Turning compact layout off restores the regular layout.
 
 | Shortcut | Action |
 | --- | --- |
@@ -56,7 +61,7 @@ Optional **React to music** follows the audio level of the application selected 
 
 **Support and ideas** at the bottom of Settings links to [GitHub Issues](https://github.com/pyrrhuladev/GlimHUD/issues) for bug reports and feature requests, and to the [repository](https://github.com/pyrrhuladev/GlimHUD). Each button opens your browser only when clicked; it does not send a report.
 
-Optional **Start with Windows** is available in Settings. It registers the current extracted executable for your Windows sign-in without administrator access. Keep that folder in place; after moving to another copy, toggle the option off and on to update its location. Windows Startup apps settings can independently disable registered applications. The option is off until explicitly enabled and does not alter Windows permissions or request UAC during sign-in.
+Optional **Start with Windows** is available in Settings. It registers the current executable for your Windows sign-in without administrator access. Keep a portable folder in place; after moving it, toggle the option off and on to update its location. Windows Startup apps settings can independently disable registered applications. The option is off until enabled and does not change Windows permissions. If the separate administrator-at-startup option is enabled, launching GlimHUD at sign-in can also show its UAC request.
 
 **Network** in Settings lets you add download and upload rates to the HUD; this module is off by default. Automatic selection uses one connected physical Ethernet or Wi-Fi adapter, preferring the Windows IPv4 default-route metric and otherwise an adapter with a gateway. Select an adapter manually for VPN, virtual-switch, or multi-adapter setups. A manually selected adapter that disconnects is shown as unavailable until it returns.
 
@@ -68,6 +73,8 @@ The network settings show the selected adapter's live rates, received/sent total
 
 **Updates** in Settings can check for a newer installed version, download it, and install it when you choose. Automatic checks can be disabled. Checks never install an update or restart the app by themselves. Both update metadata and downloaded installers must pass NetSparkle Ed25519 verification against the public key shipped with GlimHUD. Portable copies use manual updates through GitHub Releases.
 
+When GlimHUD is elevated, a requested update is handed to the normal Explorer desktop for the same Windows account so the installer stays per-user. If that desktop is unavailable, elevated, or belongs to another account, GlimHUD does not launch the installer as administrator. Restart GlimHUD normally or download the installer from Releases and run it normally. Entering another account's credentials at UAC also runs the HUD with that account's separate settings and data locations.
+
 Windows publisher signing (Authenticode) is not configured yet, so Windows may show an unknown-publisher or SmartScreen warning. Update signatures authenticate project updates; they do not provide a verified Windows publisher identity. There is no published Microsoft Store listing. See [distribution and release setup](docs/distribution.md) for the website, installer, and update pipeline, or [Microsoft Store preparation](docs/microsoft-store.md) for the separate MSIX work.
 
 ## Data sources and limits
@@ -76,11 +83,11 @@ Music comes from Windows Global System Media Transport Controls. Metadata and ar
 
 CPU usage uses Windows Processor Utility, which accounts for clock speed and boost and can exceed 100%. If that counter is unavailable, GlimHUD falls back to CPU busy time. GPU usage takes the busiest graphics engine or vendor core reading, whichever is higher, for the selected adapter. CPU/GPU/RAM sampling runs once per second independently of media and artwork loading. This follows the measurement definitions described by [Valve](https://help.steampowered.com/en/faqs/view/3462-CD4C-36BD-5767); different sampling times and adapter selections can still produce different readings.
 
-RAM and performance counters have native Windows data sources. Optional temperature sensors use LibreHardwareMonitor; available readings depend on hardware, drivers, and permissions. An unavailable measurement is shown as a dash. GlimHUD does not automatically elevate or change Windows security settings.
+RAM and performance counters have native Windows data sources. Optional temperature sensors use LibreHardwareMonitor; available readings depend on hardware, drivers, and permissions. An unavailable measurement is shown as a dash. The startup administrator option uses the normal Windows UAC prompt and never changes Windows security policy or group membership.
 
 Network readings use local Windows interface counters sampled about once per second, with rates calculated from byte-counter differences and actual elapsed time. GlimHUD measures one selected adapter at a time rather than adding physical and VPN traffic together. It does not capture packets, inspect their destinations or payloads, send probes, or require administrator access for this module. The 60-second history stays in memory; disconnected or invalid intervals appear as gaps. Network-interface and driver limitations can make a reading unavailable.
 
-FPS uses [PresentMon](https://github.com/GameTechDev/PresentMon) to count presented frames. This is not the display refresh rate or the overlay's own frame rate. ETW capture can require additional permissions. Settings shows an explicit administrator restart option when Windows denies ETW access; cancelling the Windows prompt keeps the current app running. No group membership is changed. The other overlay features work when FPS capture is unavailable. Choose a game manually when automatic process selection is unsuitable.
+FPS uses [PresentMon](https://github.com/GameTechDev/PresentMon) to count presented frames. This is not the display refresh rate or the overlay's own frame rate. ETW capture can require additional permissions. The startup UAC request can provide them; Settings also offers an administrator restart when access is denied. Cancelling a UAC prompt keeps the current app running. The other overlay features work when FPS capture is unavailable. Choose a game manually when automatic process selection is unsuitable.
 
 Game-only display is optional. Recognition uses known game installation paths and exact executable paths selected by the user; browsers and launchers are excluded where identifiable. Windowed and borderless modes are the intended targets. Exclusive fullscreen and individual anti-cheat systems need separate compatibility testing.
 

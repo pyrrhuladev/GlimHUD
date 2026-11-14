@@ -159,11 +159,15 @@
                             <TextBlock Text="{DynamicResource Loc.LanguageHint}" Style="{StaticResource Muted}" Margin="0,5,0,17"/>
                             <CheckBox x:Name="StartupCheck" Content="{DynamicResource Loc.StartWithWindows}" Checked="Startup_Changed" Unchecked="Startup_Changed" Margin="0,0,0,0"/>
                             <TextBlock x:Name="StartupStatus" Style="{StaticResource Muted}" Margin="0,6,0,17"/>
+                            <CheckBox x:Name="RequestAdministratorCheck" Content="{DynamicResource Loc.RequestAdministratorOnStartup}" Checked="RequestAdministrator_Changed" Unchecked="RequestAdministrator_Changed" Margin="0,0,0,6"/>
+                            <TextBlock Text="{DynamicResource Loc.RequestAdministratorHint}" Style="{StaticResource Muted}" Margin="0,0,0,17"/>
                             <DockPanel><TextBlock Text="{DynamicResource Loc.BackgroundOpacity}"/><TextBlock x:Name="OpacityValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
                             <Slider x:Name="OpacitySlider" Minimum="0.05" Maximum="0.85" SmallChange="0.05" LargeChange="0.1" ValueChanged="Appearance_Changed" AutomationProperties.Name="{DynamicResource Loc.BackgroundOpacity}"/>
                             <TextBlock Text="{DynamicResource Loc.OpacityHint}" Style="{StaticResource Muted}" Margin="0,5,0,17"/>
                             <DockPanel><TextBlock Text="{DynamicResource Loc.PanelScale}"/><TextBlock x:Name="ScaleValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
                             <Slider x:Name="ScaleSlider" Minimum="0.65" Maximum="1.5" SmallChange="0.05" LargeChange="0.1" ValueChanged="Appearance_Changed" AutomationProperties.Name="{DynamicResource Loc.PanelScale}"/>
+                            <CheckBox x:Name="CompactModeCheck" Content="{DynamicResource Loc.CompactMode}" Checked="CompactMode_Changed" Unchecked="CompactMode_Changed" Margin="0,15,0,6"/>
+                            <TextBlock Text="{DynamicResource Loc.CompactModeHint}" Style="{StaticResource Muted}"/>
                             <WrapPanel Margin="0,19,0,0">
                                 <CheckBox x:Name="FpsCheck" Content="FPS" Checked="Modules_Changed" Unchecked="Modules_Changed"/>
                                 <CheckBox x:Name="CpuCheck" Content="CPU" Checked="Modules_Changed" Unchecked="Modules_Changed"/>

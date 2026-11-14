@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/GlimHUD/Services/AppUpdateService.cs" Link="AppUpdateService.cs" />
+    <Compile Include="../../src/GlimHUD/Services/UpdateInstallerLauncher.cs" Link="UpdateInstallerLauncher.cs" />
+    <Compile Include="../../src/GlimHUD/Services/UnelevatedProcessLauncher.cs" Link="UnelevatedProcessLauncher.cs" />
     <PackageReference Include="NetSparkleUpdater.SparkleUpdater" Version="3.1.0" />
   </ItemGroup>
 </Project>
