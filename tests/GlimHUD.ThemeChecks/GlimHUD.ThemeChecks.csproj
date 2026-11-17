@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/GlimHUD/Models/AppSettings.cs" Link="AppSettings.cs" />
+    <Compile Include="../../src/GlimHUD/Models/HudTheme.cs" Link="HudTheme.cs" />
+    <Compile Include="../../src/GlimHUD/Models/GlowStyles.cs" Link="GlowStyles.cs" />
+    <Compile Include="../../src/GlimHUD/Services/HudThemeCatalog.cs" Link="HudThemeCatalog.cs" />
+    <Compile Include="../../src/GlimHUD/Services/SettingsStore.cs" Link="SettingsStore.cs" />
+  </ItemGroup>
+</Project>

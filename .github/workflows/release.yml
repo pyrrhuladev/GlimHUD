@@ -69,6 +69,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
       - name: Run console and archive checks
         run: .\scripts\Test.ps1 -NoRestore -NoBuild
+      - name: Check live theme layout and legacy appearance
+        run: .\scripts\Test-Themes.ps1
       - name: Install pinned NetSparkle signing tool
         run: |
           dotnet tool install NetSparkleUpdater.Tools.AppCastGenerator --version 2.9.0 --tool-path .tools/netsparkle-appcast

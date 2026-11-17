@@ -82,6 +82,7 @@ public partial class SettingsWindow : Window
         UpdateAppearanceLabels();
         RefreshStartupState();
         RefreshUpdateControls();
+        InitializeThemeControls();
         _syncing = false;
         _overlay.SnapshotsUpdated += Overlay_SnapshotsUpdated;
         L10n.LanguageChanged += LanguageChanged;
@@ -132,6 +133,7 @@ public partial class SettingsWindow : Window
             RefreshStartupState();
             UpdateProjectLinkStatus();
             RefreshUpdateControls();
+            RefreshThemeControls();
         }
         finally { _syncing = wasSyncing; }
     }
@@ -198,6 +200,7 @@ public partial class SettingsWindow : Window
         if (_syncing) return;
         _overlay.Settings.GlowEnabled = GlowEnabledCheck.IsChecked == true;
         _overlay.Settings.GlowReactive = GlowReactiveCheck.IsChecked == true;
+        MarkThemeCustomized();
         UpdateGlowControls();
         ApplyAndSave();
     }
@@ -431,6 +434,7 @@ public partial class SettingsWindow : Window
     {
         if (_syncing) return;
         _overlay.Settings.GlowStyle = GlowStyles.Normalize(SelectedKey(GlowStyleCombo));
+        MarkThemeCustomized();
         UpdateGlowControls();
         ApplyAndSave();
     }
@@ -439,6 +443,7 @@ public partial class SettingsWindow : Window
     {
         if (_syncing) return;
         _overlay.Settings.GlowIntensity = Math.Clamp(e.NewValue, 0, 1);
+        MarkThemeCustomized();
         UpdateGlowControls();
         ApplyAndSave();
     }
@@ -446,13 +451,15 @@ public partial class SettingsWindow : Window
     private void UpdateGlowControls()
     {
         var settings = _overlay.Settings;
-        GlowOptions.IsEnabled = settings.GlowEnabled;
+        var glowSurfaceAvailable = HudThemeCatalog.Resolve(settings).Layout != "cards";
+        GlowOptions.IsEnabled = settings.GlowEnabled && glowSurfaceAvailable;
         GlowSensitivityOptions.IsEnabled = settings.GlowReactive;
         var style = GlowStyles.All.First(item => item.Id == GlowStyles.Normalize(settings.GlowStyle));
         GlowStyleHint.SetResourceReference(TextBlock.TextProperty, style.DescriptionKey);
         GlowIntensityValue.Text = $"{Math.Round(settings.GlowIntensity * 100):0}%";
         GlowSensitivityValue.Text = $"{Math.Round(settings.GlowSensitivity * 100):0}%";
-        var hint = !settings.GlowEnabled || !settings.GlowReactive ? null
+        var hint = settings.GlowEnabled && !glowSurfaceAvailable ? "Loc.ThemeCardsGlowHint"
+            : !settings.GlowEnabled || !settings.GlowReactive ? null
             : _overlay.AudioSnapshot is not { IsAvailable: true } ? "Loc.GlowAudioUnavailable"
             : !_overlay.GlowAudioAvailable ? "Loc.GlowMeterWaiting"
             : _overlay.MediaSnapshot is { IsAvailable: true, IsPlaying: false } ? "Loc.GlowWaiting" : null;
@@ -463,7 +470,8 @@ public partial class SettingsWindow : Window
 
     private void UpdateGlowSignalMonitoring()
     {
-        if (IsLoaded && IsVisible && _overlay.Settings.GlowEnabled && _overlay.Settings.GlowReactive)
+        if (IsLoaded && IsVisible && _overlay.Settings.GlowEnabled && _overlay.Settings.GlowReactive
+            && HudThemeCatalog.Resolve(_overlay.Settings).Layout != "cards")
         {
             UpdateGlowSignal();
             _glowSignalTimer.Start();
@@ -488,6 +496,7 @@ public partial class SettingsWindow : Window
     {
         if (_syncing) return;
         _overlay.Settings.GlowSensitivity = Math.Clamp(e.NewValue, 0, 1);
+        MarkThemeCustomized();
         UpdateGlowControls();
         ApplyAndSave();
     }
@@ -720,6 +729,7 @@ public partial class SettingsWindow : Window
         if (_syncing) return;
         _overlay.Settings.BackgroundOpacity = OpacitySlider.Value;
         _overlay.Settings.Scale = ScaleSlider.Value;
+        if (ReferenceEquals(sender, OpacitySlider)) MarkThemeCustomized();
         UpdateAppearanceLabels();
         ApplyAndSave();
     }
@@ -747,6 +757,7 @@ public partial class SettingsWindow : Window
     {
         if (_syncing) return;
         _overlay.Settings.CompactMode = CompactModeCheck.IsChecked == true;
+        MarkThemeCustomized();
         ApplyAndSave();
     }
 
@@ -789,6 +800,7 @@ public partial class SettingsWindow : Window
     {
         if (_syncing) return;
         _overlay.Settings.UseWindowsAccent = WindowsAccentCheck.IsChecked == true;
+        MarkThemeCustomized();
         UpdateAccentControls();
         ApplyAndSave();
     }
@@ -834,6 +846,7 @@ public partial class SettingsWindow : Window
         CustomColorSwatch.Background = new SolidColorBrush(color);
         if (!save) return;
         _overlay.Settings.CustomAccentColor = normalized;
+        MarkThemeCustomized();
         ApplyAndSave();
     }
 
@@ -943,6 +956,7 @@ public partial class SettingsWindow : Window
         if (!save) return;
         if (text) _overlay.Settings.TextColor = normalized;
         else _overlay.Settings.BackgroundColor = normalized;
+        MarkThemeCustomized();
         var wasSyncing = _syncing;
         _syncing = true;
         try { preset.SelectedValue = ColorPreset(normalized, text); }
@@ -1088,6 +1102,7 @@ public partial class SettingsWindow : Window
     private void ApplyAndSave()
     {
         _overlay.ApplySettings();
+        RefreshThemePresentation();
         SaveStatus.SetResourceReference(TextBlock.TextProperty, "Loc.Saving");
         _saveTimer.Stop();
         _saveTimer.Start();

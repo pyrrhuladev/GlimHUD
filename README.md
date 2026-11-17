@@ -14,6 +14,7 @@ A transparent Windows overlay for music controls, FPS, CPU, GPU, memory, and net
 
 - Compact, movable overlay with a translucent background and readable controls.
 - Optional compact layout with smaller text and spacing, hidden artwork and section icons; the regular layout remains available.
+- Editable Classic, Capsule, Slate, Terminal, and Paper [themes](docs/themes.md): panel and card shapes, horizontal/vertical layout, module order, spacing, typography, colors, and optional controls. Import and export themes as JSON.
 - Current track, artwork, previous/play/pause/next controls through Windows media sessions. Supports compatible players, including Yandex Music.
 - Per-application music volume through WASAPI, with optional scrolling over the player area. It does not fall back to changing the system master volume.
 - Presented FPS through PresentMon, CPU/GPU load and available temperatures, and physical memory usage.
@@ -38,6 +39,8 @@ On the first launch, position the unlocked overlay, then use the tray menu or Se
 **Request administrator access at startup** is enabled by default for unpackaged copies. GlimHUD asks Windows for elevation through UAC; approving restarts it with administrator access, while cancelling keeps it running normally. Disable this option in Settings to use normal launches. An already elevated process does not request elevation again. Administrator access can help with FPS capture and some hardware sensors, but does not guarantee every reading. Music controls and network counters do not require it. Packaged and diagnostic launches do not use this automatic request.
 
 **Compact layout** is optional and saved in Settings. It reduces text sizes and spacing and hides album artwork, section icons, the mute button, and the volume slider. Previous/play/next controls, volume percentage, and selected metrics remain visible. Adjust volume by scrolling over the player if that option is enabled, or use the global volume/mute shortcuts. Turning compact layout off restores the regular layout.
+
+**Themes** can change the panel's structure as well as its colors. Select a preset under Themes, then expand its customization controls to change its layout, corners, spacing, text, and decorative elements. Existing appearance and glow controls edit the same theme. Export a theme to share it, or import a theme JSON file to apply it immediately. Themes keep your enabled modules, device selections, panel position, language, and application behavior. See [the theme format and limits](docs/themes.md).
 
 | Shortcut | Action |
 | --- | --- |

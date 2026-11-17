@@ -61,7 +61,7 @@ foreach ($name in @('LICENSE', 'README.md', 'CHANGELOG.md', 'THIRD-PARTY-NOTICES
 }
 $docsSource = Join-Path $projectRoot 'docs'
 if (Test-Path -LiteralPath $docsSource -PathType Container) {
-    Get-ChildItem -LiteralPath $docsSource -File -Recurse | Where-Object { $_.Extension -in '.md', '.txt', '.png', '.svg' } | ForEach-Object {
+    Get-ChildItem -LiteralPath $docsSource -File -Recurse | Where-Object { $_.Extension -in '.md', '.txt', '.png', '.svg' -or $_.Name.EndsWith('.glimtheme.json') } | ForEach-Object {
         $relativePath = $_.FullName.Substring($docsSource.Length).TrimStart('\', '/')
         $destinationPath = Join-Path (Join-Path $outputPath 'docs') $relativePath
         New-Item -ItemType Directory -Path (Split-Path -Parent $destinationPath) -Force | Out-Null

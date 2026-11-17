@@ -25,6 +25,10 @@ public static class SettingsStore
             settings.GlowIntensity = double.IsFinite(settings.GlowIntensity) ? Math.Clamp(settings.GlowIntensity, 0, 1) : 0.65;
             settings.GlowSensitivity = double.IsFinite(settings.GlowSensitivity) ? Math.Clamp(settings.GlowSensitivity, 0, 1) : 0.75;
             settings.Scale = double.IsFinite(settings.Scale) ? Math.Clamp(settings.Scale, 0.65, 1.5) : 1;
+            // Theme structure is optional so old installations retain their exact layout.
+            // Palette/compact/glow values above remain authoritative after any appearance edits.
+            if (settings.Theme is { } theme)
+                settings.Theme = theme.SchemaVersion == HudThemeCatalog.CurrentSchemaVersion ? HudThemeCatalog.Normalize(theme) : null;
             if (settings.Left is { } left && !double.IsFinite(left)) settings.Left = null;
             if (settings.Top is { } top && !double.IsFinite(top)) settings.Top = null;
             if (settings.CustomAccentColor is null || !System.Text.RegularExpressions.Regex.IsMatch(settings.CustomAccentColor, "^#[0-9A-Fa-f]{6}$"))

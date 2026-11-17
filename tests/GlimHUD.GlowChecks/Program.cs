@@ -99,6 +99,21 @@ internal static class Program
                 "The interior color glow strengthens smoothly toward the perimeter.");
             Check(AlphaSum(both) > AlphaSum(loud) && Pixel(both, 186, 58).A > 0,
                 "The diagnostic combined layer contains both interior wash and exterior emission.");
+            Check(double.IsNaN(surface.CornerRadius), "An unspecified theme radius retains the historical capsule.");
+            surface.CornerRadius = -20;
+            Check(surface.CornerRadius == 0, "An explicit theme radius cannot become negative.");
+            surface.CornerRadius = double.PositiveInfinity;
+            Check(double.IsNaN(surface.CornerRadius), "An invalid theme radius returns to the historical capsule.");
+            var squareInner = Render(1, 1, layer: GlowLayer.Inner, cornerRadius: 0);
+            var roundedInner = Render(1, 1, layer: GlowLayer.Inner, cornerRadius: 8);
+            Check(Pixel(squareInner, 28, 28).A > 0 && Pixel(inner, 28, 28).A == 0,
+                "Square themed panels emit their inner glow inside the actual square corner.");
+            Check(Pixel(roundedInner, 28, 28).A < Pixel(squareInner, 28, 28).A
+                && Difference(inner, roundedInner) > .001,
+                "A themed rounded rectangle follows its own radius instead of the old capsule.");
+            Check(BorderAlpha(Render(1, 1, layer: GlowLayer.Both, cornerRadius: 0)) == 0,
+                "Square panel halos retain the fixed rendering padding.");
+            CheckThemeRadiusInvalidatesRaster();
             Check(AlphaSum(Render(0, 1, layer: GlowLayer.Both)) == 0,
                 "Zero level extinguishes the complete RGB effect, including the inner wash.");
             surface.Phase = -1e-20;
@@ -224,6 +239,24 @@ internal static class Program
         }
     }
 
+    private static void CheckThemeRadiusInvalidatesRaster()
+    {
+        var surface = new ReactiveGlowSurface { Width = 320, Height = 64, Layer = GlowLayer.Inner, Level = 1, Intensity = 1 };
+        var root = new Canvas { Width = 372, Height = 116 };
+        Canvas.SetLeft(surface, 26); Canvas.SetTop(surface, 26); root.Children.Add(surface);
+        root.Measure(new Size(372, 116)); root.Arrange(new Rect(0, 0, 372, 116)); root.UpdateLayout();
+        var target = new RenderTargetBitmap(372, 116, 96, 96, PixelFormats.Pbgra32);
+        target.Render(root);
+        var capsuleCorner = Pixel(target, 28, 28).A;
+        surface.CornerRadius = 0;
+        root.UpdateLayout(); target.Clear(); target.Render(root);
+        var squareCorner = Pixel(target, 28, 28).A;
+        surface.CornerRadius = double.NaN;
+        root.UpdateLayout(); target.Clear(); target.Render(root);
+        Check(capsuleCorner == 0 && squareCorner > 0 && Pixel(target, 28, 28).A == capsuleCorner,
+            "Changing only a theme radius invalidates the cached raster and returning to capsule restores it.");
+    }
+
     private static void CheckCompanionWindow()
     {
         var canvas = new Canvas();
@@ -329,13 +362,14 @@ internal static class Program
     private static extern uint GetDpiForWindow(IntPtr handle);
 
     private static RenderTargetBitmap Render(double level, double intensity, double phase = 0, GlowLayer layer = GlowLayer.Outer,
-        string effectStyle = GlowStyles.RainbowWave, double pulse = 0, double pulsePosition = 0)
+        string effectStyle = GlowStyles.RainbowWave, double pulse = 0, double pulsePosition = 0, double cornerRadius = double.NaN)
     {
         var root = new Canvas { Width = 372, Height = 116 };
         var surface = new ReactiveGlowSurface
         {
             Width = 320, Height = 64, Level = level, Intensity = intensity,
-            Phase = phase, Layer = layer, EffectStyle = effectStyle, Pulse = pulse, PulsePosition = pulsePosition
+            Phase = phase, Layer = layer, EffectStyle = effectStyle, Pulse = pulse, PulsePosition = pulsePosition,
+            CornerRadius = cornerRadius
         };
         Canvas.SetLeft(surface, 26);
         Canvas.SetTop(surface, 26);

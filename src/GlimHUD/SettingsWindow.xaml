@@ -151,6 +151,85 @@
             </Grid>
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,2,24,0">
                 <StackPanel>
+                    <Border x:Name="ThemesCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Loc.Themes}" Style="{StaticResource SectionTitle}"/>
+                            <TextBlock Text="{DynamicResource Loc.ThemesHint}" Style="{StaticResource Muted}" Margin="0,0,0,7"/>
+                            <ComboBox x:Name="ThemeCombo" SelectionChanged="Theme_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemePreset}"/>
+                            <Border Background="#090C12" BorderBrush="#242933" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="{DynamicResource Loc.ThemePreview}" Style="{StaticResource Muted}" FontSize="10" Margin="0,0,0,10"/>
+                                    <Viewbox Stretch="Uniform" StretchDirection="DownOnly" MaxHeight="126" HorizontalAlignment="Center">
+                                        <Border x:Name="ThemePreviewSurface"><StackPanel x:Name="ThemePreviewModules" Orientation="Horizontal"/></Border>
+                                    </Viewbox>
+                                </StackPanel>
+                            </Border>
+                            <WrapPanel Margin="0,13,0,0">
+                                <Button Content="{DynamicResource Loc.ThemeImport}" Style="{StaticResource ActionButton}" Click="ImportTheme_Click" Margin="0,0,8,8"/>
+                                <Button Content="{DynamicResource Loc.ThemeExport}" Style="{StaticResource ActionButton}" Click="ExportTheme_Click" Margin="0,0,8,8"/>
+                                <Button Content="{DynamicResource Loc.ThemeReset}" Style="{StaticResource ActionButton}" Click="ResetTheme_Click" Margin="0,0,0,8"/>
+                            </WrapPanel>
+                            <TextBlock x:Name="ThemeFileStatus" Style="{StaticResource Muted}" Margin="0,0,0,9" Visibility="Collapsed"/>
+                            <Expander x:Name="ThemeAdvanced" Header="{DynamicResource Loc.ThemeCustomize}" Foreground="#ECEFF4" Margin="0,5,0,0">
+                                <StackPanel Margin="0,13,0,0">
+                                    <TextBlock Text="{DynamicResource Loc.ThemeName}"/>
+                                    <TextBox x:Name="ThemeNameBox" Style="{StaticResource DarkTextBox}" MaxLength="64" Margin="0,7,0,12" TextChanged="ThemeName_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeName}"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="{DynamicResource Loc.ThemeLayout}"/><ComboBox x:Name="ThemeLayoutCombo" SelectionChanged="ThemeStructure_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeLayout}"/></StackPanel>
+                                        <StackPanel Grid.Column="2"><TextBlock Text="{DynamicResource Loc.ThemeOrientation}"/><ComboBox x:Name="ThemeOrientationCombo" SelectionChanged="ThemeStructure_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeOrientation}"/></StackPanel>
+                                    </Grid>
+                                    <TextBlock Text="{DynamicResource Loc.ThemeFont}" Margin="0,13,0,0"/>
+                                    <ComboBox x:Name="ThemeFontCombo" SelectionChanged="ThemeStructure_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeFont}"/>
+                                    <Grid Margin="0,13,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="14"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <DockPanel><TextBlock Text="{DynamicResource Loc.ThemeRadius}"/><TextBlock x:Name="ThemeRadiusValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemeRadiusSlider" Minimum="0" Maximum="100" TickFrequency="1" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeRadius}"/>
+                                            <DockPanel Margin="0,10,0,0"><TextBlock Text="{DynamicResource Loc.ThemeHeight}"/><TextBlock x:Name="ThemeHeightValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemeHeightSlider" Minimum="28" Maximum="80" TickFrequency="1" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeHeight}"/>
+                                            <DockPanel Margin="0,10,0,0"><TextBlock Text="{DynamicResource Loc.ThemePaddingHorizontal}"/><TextBlock x:Name="ThemePaddingHorizontalValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemePaddingHorizontalSlider" Minimum="0" Maximum="40" TickFrequency="1" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemePaddingHorizontal}"/>
+                                            <DockPanel Margin="0,10,0,0"><TextBlock Text="{DynamicResource Loc.ThemeGap}"/><TextBlock x:Name="ThemeGapValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemeGapSlider" Minimum="0" Maximum="32" TickFrequency="1" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeGap}"/>
+                                            <DockPanel Margin="0,10,0,0"><TextBlock Text="{DynamicResource Loc.ThemeValueSize}"/><TextBlock x:Name="ThemeValueSizeValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemeValueSizeSlider" Minimum="10" Maximum="32" TickFrequency="1" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeValueSize}"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <DockPanel><TextBlock Text="{DynamicResource Loc.ThemeModuleRadius}"/><TextBlock x:Name="ThemeModuleRadiusValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemeModuleRadiusSlider" Minimum="0" Maximum="50" TickFrequency="1" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeModuleRadius}"/>
+                                            <DockPanel Margin="0,10,0,0"><TextBlock Text="{DynamicResource Loc.ThemeBorder}"/><TextBlock x:Name="ThemeBorderValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemeBorderSlider" Minimum="0" Maximum="4" TickFrequency="0.5" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeBorder}"/>
+                                            <DockPanel Margin="0,10,0,0"><TextBlock Text="{DynamicResource Loc.ThemePaddingVertical}"/><TextBlock x:Name="ThemePaddingVerticalValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemePaddingVerticalSlider" Minimum="0" Maximum="24" TickFrequency="1" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemePaddingVertical}"/>
+                                            <DockPanel Margin="0,10,0,0"><TextBlock Text="{DynamicResource Loc.ThemeLabelSize}"/><TextBlock x:Name="ThemeLabelSizeValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemeLabelSizeSlider" Minimum="8" Maximum="16" TickFrequency="1" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeLabelSize}"/>
+                                            <DockPanel Margin="0,10,0,0"><TextBlock Text="{DynamicResource Loc.ThemeSecondarySize}"/><TextBlock x:Name="ThemeSecondarySizeValue" DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}"/></DockPanel>
+                                            <Slider x:Name="ThemeSecondarySizeSlider" Minimum="8" Maximum="20" TickFrequency="1" ValueChanged="ThemeGeometry_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeSecondarySize}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                    <WrapPanel Margin="0,16,0,0">
+                                        <CheckBox x:Name="ThemeIconsCheck" Content="{DynamicResource Loc.ThemeIcons}" Checked="ThemeDetails_Changed" Unchecked="ThemeDetails_Changed" Margin="0,0,18,10"/>
+                                        <CheckBox x:Name="ThemeLabelsCheck" Content="{DynamicResource Loc.ThemeLabels}" Checked="ThemeDetails_Changed" Unchecked="ThemeDetails_Changed" Margin="0,0,18,10"/>
+                                        <CheckBox x:Name="ThemeArtworkCheck" Content="{DynamicResource Loc.ThemeArtwork}" Checked="ThemeDetails_Changed" Unchecked="ThemeDetails_Changed" Margin="0,0,18,10"/>
+                                        <CheckBox x:Name="ThemeVolumeCheck" Content="{DynamicResource Loc.ThemeVolumeSlider}" Checked="ThemeDetails_Changed" Unchecked="ThemeDetails_Changed" Margin="0,0,18,10"/>
+                                        <CheckBox x:Name="ThemeDividersCheck" Content="{DynamicResource Loc.ThemeDividers}" Checked="ThemeDetails_Changed" Unchecked="ThemeDetails_Changed" Margin="0,0,0,10"/>
+                                    </WrapPanel>
+                                    <TextBlock Text="{DynamicResource Loc.ThemeCompactHint}" Style="{StaticResource Muted}" FontSize="11"/>
+                                    <TextBlock Text="{DynamicResource Loc.ThemeModuleOrder}" Margin="0,13,0,7"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <ListBox x:Name="ThemeModuleOrderList" Height="146" Background="#0B0E13" BorderBrush="#2C323E" Foreground="#ECEFF4" ItemContainerStyle="{StaticResource GameListItem}" DisplayMemberPath="Label" SelectionChanged="ThemeModuleSelection_Changed" AutomationProperties.Name="{DynamicResource Loc.ThemeModuleOrder}"/>
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                            <Button x:Name="ThemeModuleUpButton" Content="{DynamicResource Loc.ThemeMoveUp}" Style="{StaticResource ActionButton}" Click="ThemeModuleUp_Click" IsEnabled="False"/>
+                                            <Button x:Name="ThemeModuleDownButton" Content="{DynamicResource Loc.ThemeMoveDown}" Style="{StaticResource ActionButton}" Click="ThemeModuleDown_Click" IsEnabled="False" Margin="0,8,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Text="{DynamicResource Loc.ThemeColorsHint}" Style="{StaticResource Muted}" FontSize="11" Margin="0,12,0,0"/>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </Border>
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="{DynamicResource Loc.Appearance}" Style="{StaticResource SectionTitle}"/>

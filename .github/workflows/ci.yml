@@ -36,3 +36,5 @@ jobs:
         run: dotnet build .\GlimHUD.slnx --configuration Release --no-restore
       - name: Run console and archive checks
         run: .\scripts\Test.ps1 -NoRestore -NoBuild
+      - name: Check live theme layout and legacy appearance
+        run: .\scripts\Test-Themes.ps1

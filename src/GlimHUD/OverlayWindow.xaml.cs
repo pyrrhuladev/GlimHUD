@@ -81,6 +81,8 @@ public partial class OverlayWindow : Window
     private Task? _networkTask;
     private Task? _volumeTask;
     private Task? _stopTask;
+    private HudTheme? _activeTheme;
+    private readonly Dictionary<string, Border> _themeModuleFrames = new(StringComparer.Ordinal);
 
     public AppSettings Settings { get; } = SettingsStore.Load();
     public AppUpdateService AppUpdates { get; } = new();
@@ -140,6 +142,7 @@ public partial class OverlayWindow : Window
         };
         LocationChanged += (_, _) => { UpdateWheelRegion(); UpdateGlowBounds(); };
         SizeChanged += (_, _) => { UpdateWheelRegion(); UpdateGlowBounds(); };
+        PanelSurface.SizeChanged += (_, _) => UpdateThemeCornerRadius();
         ApplySettings();
     }
 
@@ -308,6 +311,7 @@ public partial class OverlayWindow : Window
             FpsSection.Visibility = Visibility.Visible;
         }
         ApplyCompactLayout();
+        ApplyThemeLayout();
         UpdateModuleDividers();
         _telemetry.PreferredGpuIdentifier = Settings.GpuIdentifier;
         var networkSelectionChanged = !string.Equals(_network.PreferredAdapterId, Settings.NetworkAdapterId, StringComparison.OrdinalIgnoreCase);
@@ -344,11 +348,31 @@ public partial class OverlayWindow : Window
     private void ApplyCompactLayout()
     {
         var compact = Settings.CompactMode;
+        FontFamily = new FontFamily("Segoe UI");
+        Resources["ThemeButtonCornerRadius"] = new CornerRadius(12);
+        ModuleHost.Orientation = Orientation.Horizontal;
+        PanelSurface.BorderThickness = new Thickness(1);
+        PanelSurface.SetResourceReference(Border.BackgroundProperty, "OverlayBackgroundBrush");
+        foreach (var (_, section, divider) in ThemeModules())
+        {
+            section.MinHeight = 0;
+            section.HorizontalAlignment = HorizontalAlignment.Stretch;
+            if (divider is not null) divider.Width = 1;
+        }
+        foreach (var frame in _themeModuleFrames.Values)
+        {
+            frame.Padding = frame.Margin = frame.BorderThickness = new Thickness(0);
+            frame.Background = Brushes.Transparent;
+            frame.CornerRadius = new CornerRadius(0);
+        }
         PanelContent.Height = compact ? 24 : 50;
         PanelContent.Margin = compact ? new Thickness(12, 2, 12, 2) : new Thickness(24, 8, 24, 8);
         PanelSurface.CornerRadius = new CornerRadius(compact ? 15 : 34);
         ArtworkFrame.Visibility = Visible(!compact);
+        SetArtworkSize(48, 12);
         CpuIcon.Visibility = GpuIcon.Visibility = RamIcon.Visibility = NetworkIcon.Visibility = Visible(!compact);
+        CpuIcon.FontSize = GpuIcon.FontSize = RamIcon.FontSize = 24;
+        NetworkIcon.Width = NetworkIcon.Height = 22;
         VolumeSlider.Visibility = MuteButton.Visibility = VolumeControlsDivider.Visibility = Visible(!compact);
 
         TrackInfo.Width = compact ? 126 : 145;
@@ -381,6 +405,7 @@ public partial class OverlayWindow : Window
         RamContent.Width = compact ? 106 : 134;
         foreach (var label in new[] { FpsLabel, CpuLabel, GpuLabel, RamLabel })
         {
+            label.Visibility = Visibility.Visible;
             label.FontSize = compact ? 7 : 10;
             label.LineHeight = compact ? 8 : double.NaN;
             label.LineStackingStrategy = compact ? LineStackingStrategy.BlockLineHeight : LineStackingStrategy.MaxHeight;
@@ -405,7 +430,7 @@ public partial class OverlayWindow : Window
         RamMemory.FontSize = compact ? 8.5 : 10;
         RamMemory.Width = compact ? 71 : 77;
         RamMemory.Margin = new Thickness(0, 0, 0, compact ? 0 : 5);
-        foreach (var divider in new[] { MusicDivider, FpsDivider, CpuDivider, GpuDivider, RamDivider })
+        foreach (var divider in new[] { MusicDivider, FpsDivider, CpuDivider, GpuDivider, RamDivider, NetworkDivider })
         {
             divider.Height = compact ? 14 : 32;
             divider.Margin = new Thickness(compact ? 7 : 13, 0, compact ? 7 : 13, 0);
@@ -414,6 +439,9 @@ public partial class OverlayWindow : Window
         NetworkContent.Orientation = compact ? Orientation.Horizontal : Orientation.Vertical;
         NetworkContent.Width = compact ? 114 : 99;
         NetworkLabel.FontSize = compact ? 7 : 10;
+        NetworkLabel.Visibility = Visibility.Visible;
+        NetworkLabel.LineHeight = double.NaN;
+        NetworkLabel.LineStackingStrategy = LineStackingStrategy.MaxHeight;
         NetworkLabel.Margin = compact ? new Thickness(0, 0, 5, 0) : new Thickness(0, 0, 0, 2);
         NetworkLabel.VerticalAlignment = compact ? VerticalAlignment.Center : VerticalAlignment.Top;
         if (compact) NetworkLabel.Text = L10n.Text("NET", "СЕТЬ");
@@ -426,6 +454,184 @@ public partial class OverlayWindow : Window
         }
         NetworkDownloadDirection.Width = NetworkUploadDirection.Width = compact ? 10 : 13;
     }
+
+    private (string Id, StackPanel Section, Border Divider)[] ThemeModules() =>
+    [
+        ("music", MusicSection, MusicDivider), ("fps", FpsSection, FpsDivider),
+        ("cpu", CpuSection, CpuDivider), ("gpu", GpuSection, GpuDivider),
+        ("ram", RamSection, RamDivider), ("network", NetworkSection, NetworkDivider)
+    ];
+
+    /// <summary>Theme documents supply bounded values only; the application owns all visuals and controls.</summary>
+    private void ApplyThemeLayout()
+    {
+        _activeTheme = Settings.Theme is null ? null : HudThemeCatalog.Resolve(Settings);
+        var modules = ThemeModules();
+        if (_activeTheme is null)
+        {
+            // Returning to an older appearance also restores the original ordering and transparent wrappers.
+            if (_themeModuleFrames.Count > 0)
+            {
+                ModuleHost.Children.Clear();
+                foreach (var (id, section, _) in modules)
+                {
+                    var frame = _themeModuleFrames[id];
+                    frame.Visibility = section.Visibility;
+                    ModuleHost.Children.Add(frame);
+                }
+            }
+            return;
+        }
+
+        var theme = _activeTheme;
+        var compact = Settings.CompactMode;
+        var factor = compact ? .68 : 1;
+        var cards = theme.Layout == "cards";
+        var vertical = theme.Orientation == "vertical";
+        var paddingX = theme.PaddingHorizontal * factor;
+        var paddingY = theme.PaddingVertical * factor;
+        var gap = theme.ModuleGap * factor;
+        var valueSize = Math.Max(10, theme.ValueFontSize * factor);
+        var labelSize = Math.Max(7, theme.LabelFontSize * factor);
+        var secondarySize = Math.Max(8, theme.SecondaryFontSize * factor);
+        var lineHeight = valueSize * 1.35;
+        var labelHeight = theme.ShowLabels ? labelSize * 1.4 + 2 : 0;
+        var contentHeight = Math.Max(theme.ContentHeight * factor, Math.Max(lineHeight + labelHeight, secondarySize * 2.7 + labelHeight));
+
+        FontFamily = new FontFamily(theme.FontFamily);
+        Resources["ThemeButtonCornerRadius"] = new CornerRadius(Math.Min(theme.ModuleCornerRadius, 14));
+        PanelSurface.CornerRadius = new CornerRadius(theme.CornerRadius * factor);
+        PanelSurface.BorderThickness = new Thickness(cards ? 0 : theme.BorderThickness);
+        if (cards) PanelSurface.Background = Brushes.Transparent;
+        PanelContent.Height = double.NaN;
+        PanelContent.Margin = cards ? new Thickness(0) : new Thickness(paddingX, paddingY, paddingX, paddingY);
+        ModuleHost.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
+
+        var showIcons = theme.ShowIcons && !compact;
+        ArtworkFrame.Visibility = Visible(theme.ShowArtwork && !compact);
+        var artworkSize = Math.Clamp(contentHeight, 24, 48);
+        SetArtworkSize(artworkSize, Math.Min(theme.ModuleCornerRadius, artworkSize / 2));
+        CpuIcon.Visibility = GpuIcon.Visibility = RamIcon.Visibility = NetworkIcon.Visibility = Visible(showIcons);
+        CpuIcon.FontSize = GpuIcon.FontSize = RamIcon.FontSize = Math.Clamp(valueSize, 14, 24);
+        NetworkIcon.Width = NetworkIcon.Height = Math.Clamp(valueSize, 14, 22);
+        var showSlider = theme.ShowVolumeSlider && !compact;
+        VolumeSlider.Visibility = MuteButton.Visibility = VolumeControlsDivider.Visibility = Visible(showSlider);
+
+        foreach (var label in new[] { FpsLabel, CpuLabel, GpuLabel, RamLabel, NetworkLabel })
+        {
+            label.Visibility = Visible(theme.ShowLabels);
+            label.FontSize = labelSize;
+            label.LineHeight = labelSize * 1.4;
+            label.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+            label.Margin = new Thickness(0, 0, 0, theme.ShowLabels ? 2 : 0);
+        }
+        NetworkLabel.VerticalAlignment = VerticalAlignment.Top;
+        NetworkContent.Orientation = Orientation.Vertical;
+        NetworkLabel.SetResourceReference(TextBlock.TextProperty, "Loc.NetworkModule");
+        foreach (var value in new[] { FpsValue, CpuValue, GpuValue, RamValue })
+        {
+            value.FontSize = valueSize;
+            value.LineHeight = lineHeight;
+            value.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+        }
+        FpsContent.Width = MeasureThemeText("9999", valueSize, FontWeights.SemiBold) + 2;
+        var percentWidth = MeasureThemeText("100%", valueSize, FontWeights.SemiBold) + 2;
+        var temperatureWidth = MeasureThemeText("100°C", secondarySize, FontWeights.Normal) + 6;
+        foreach (var value in new[] { CpuValue, GpuValue, RamValue }) value.Width = percentWidth;
+        foreach (var temperature in new[] { CpuTemperature, GpuTemperature })
+        {
+            temperature.FontSize = secondarySize;
+            temperature.Width = temperatureWidth;
+            temperature.Margin = new Thickness(4, 0, 0, 2);
+        }
+        CpuContent.Width = GpuContent.Width = percentWidth + temperatureWidth + 4;
+        RamMemory.FontSize = secondarySize;
+        RamMemory.Width = Math.Max(MeasureThemeText("128.0 / 128.0 GB", secondarySize, FontWeights.Normal),
+            MeasureThemeText("128,0 / 128,0 ГБ", secondarySize, FontWeights.Normal)) + 4;
+        RamMemory.Margin = new Thickness(4, 0, 0, 2);
+        RamContent.Width = percentWidth + RamMemory.Width + 4;
+
+        foreach (var value in new[] { NetworkDownloadValue, NetworkUploadValue, NetworkDownloadDirection, NetworkUploadDirection })
+        {
+            value.FontSize = secondarySize;
+            value.LineHeight = secondarySize * 1.35;
+            value.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+        }
+        NetworkDownloadDirection.Width = NetworkUploadDirection.Width = secondarySize + 3;
+        NetworkContent.Width = Math.Max(MeasureThemeText("999.9 MB/s", secondarySize, FontWeights.SemiBold) + secondarySize + 9,
+            MeasureThemeText(L10n.Text("Network", "Сеть"), labelSize, FontWeights.SemiBold));
+
+        TrackTitle.FontSize = Math.Max(10, valueSize * .68);
+        TrackArtist.FontSize = secondarySize;
+        TrackTitle.LineHeight = TrackTitle.FontSize * 1.35;
+        TrackArtist.LineHeight = secondarySize * 1.35;
+        TrackTitle.LineStackingStrategy = TrackArtist.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+        TrackArtist.Margin = new Thickness(0, 1, 0, 0);
+        TrackInfo.Width = Math.Clamp(145 * factor, 110, 210);
+        TrackInfo.Margin = new Thickness(ArtworkFrame.Visibility == Visibility.Visible ? 10 : 0, 0, 7, 0);
+        VolumeValue.FontSize = secondarySize;
+        VolumeValue.Width = MeasureThemeText("100%", secondarySize, FontWeights.Normal) + 2;
+        VolumeValue.Margin = new Thickness(3, 0, 0, 0);
+        var controlSize = Math.Clamp(contentHeight, 24, 36);
+        PreviousButton.Width = NextButton.Width = Math.Max(22, controlSize - 6);
+        PreviousButton.Height = NextButton.Height = controlSize;
+        PlayButton.Width = controlSize + 2;
+        PlayButton.Height = controlSize;
+        PlaybackCircle.Width = PlaybackCircle.Height = controlSize - 4;
+        PlaybackCircle.CornerRadius = new CornerRadius(Math.Min(theme.ModuleCornerRadius, (controlSize - 4) / 2));
+        PlaybackGlyph.Width = Math.Max(9, controlSize * .30);
+        PlaybackGlyph.Height = Math.Max(11, controlSize * .36);
+
+        // Create the frames once; controls keep their event handlers, media state and automation identities.
+        if (_themeModuleFrames.Count == 0)
+        {
+            ModuleHost.Children.Clear();
+            foreach (var (id, section, _) in modules)
+                _themeModuleFrames[id] = new Border { Tag = id, Child = section };
+        }
+        ModuleHost.Children.Clear();
+        var ordered = theme.ModuleOrder.Select(id => modules.First(module => module.Id == id)).ToArray();
+        var visible = ordered.Where(module => module.Section.Visibility == Visibility.Visible).ToArray();
+        foreach (var (id, section, _) in ordered)
+        {
+            var frame = _themeModuleFrames[id];
+            var last = visible.Length > 0 && visible[^1].Id == id;
+            frame.Visibility = section.Visibility;
+            section.MinHeight = contentHeight;
+            section.HorizontalAlignment = HorizontalAlignment.Left;
+            frame.CornerRadius = new CornerRadius(theme.ModuleCornerRadius * factor);
+            frame.Padding = cards ? new Thickness(paddingX, paddingY, paddingX, paddingY) : new Thickness(0);
+            var horizontalGap = !cards && theme.ShowDividers ? gap / 2 : gap;
+            frame.Margin = vertical ? new Thickness(0, 0, 0, last ? 0 : gap) : new Thickness(0, 0, last ? 0 : horizontalGap, 0);
+            if (cards)
+            {
+                frame.SetResourceReference(Border.BackgroundProperty, "OverlayBackgroundBrush");
+                frame.SetResourceReference(Border.BorderBrushProperty, "AccentPanelBorderBrush");
+                frame.BorderThickness = new Thickness(theme.BorderThickness);
+            }
+            else if (vertical && theme.ShowDividers && !last)
+            {
+                frame.SetResourceReference(Border.BorderBrushProperty, "AccentDividerBrush");
+                frame.BorderThickness = new Thickness(0, 0, 0, 1);
+                frame.Padding = new Thickness(0, 0, 0, gap);
+            }
+            ModuleHost.Children.Add(frame);
+        }
+    }
+
+    private void SetArtworkSize(double size, double radius)
+    {
+        ArtworkFrame.Width = ArtworkFrame.Height = size;
+        ArtworkFrame.CornerRadius = new CornerRadius(radius);
+        if (ArtworkFrame.Child is not Grid grid) return;
+        grid.Width = grid.Height = size - 2;
+        grid.Clip = new RectangleGeometry(new Rect(0, 0, size - 2, size - 2), Math.Max(0, radius - 1), Math.Max(0, radius - 1));
+    }
+
+    private double MeasureThemeText(string text, double size, FontWeight weight)
+        => Math.Ceiling(new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            new Typeface(FontFamily, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.White,
+            VisualTreeHelper.GetDpi(this).PixelsPerDip).WidthIncludingTrailingWhitespace);
 
     private bool CanCheckAutomatically => _initializeServices && _allowUpdateChecks && _loaded
         && !_closing && Settings.CheckForUpdates && AppUpdates.Snapshot.IsInstalled
@@ -501,18 +707,22 @@ public partial class OverlayWindow : Window
     {
         // A module's separator belongs only between visible neighbors, never at an edge.
         // Keep each value column at a stable width while the common outer inset stays equal.
-        (FrameworkElement Section, Border? Divider)[] modules =
-        [
-            (MusicSection, MusicDivider), (FpsSection, FpsDivider),
-            (CpuSection, CpuDivider), (GpuSection, GpuDivider), (RamSection, RamDivider),
-            (NetworkSection, null)
-        ];
+        var moduleDefinitions = ThemeModules();
+        var modules = (_activeTheme is { } theme ? theme.ModuleOrder : moduleDefinitions.Select(module => module.Id))
+            .Select(id => moduleDefinitions.First(module => module.Id == id)).ToArray();
         var visibleAfter = false;
         for (var index = modules.Length - 1; index >= 0; index--)
         {
-            var (section, divider) = modules[index];
+            var (_, section, divider) = modules[index];
             var visible = section.Visibility == Visibility.Visible;
-            if (divider is not null) divider.Visibility = Visible(visible && visibleAfter);
+            var show = visible && visibleAfter && (_activeTheme is null
+                || (_activeTheme.ShowDividers && _activeTheme.Layout == "bar" && _activeTheme.Orientation == "horizontal"));
+            divider.Visibility = Visible(show);
+            if (_activeTheme is { } active)
+            {
+                divider.Height = Math.Max(12, active.ContentHeight * (Settings.CompactMode ? .68 : 1) * .65);
+                divider.Margin = new Thickness(active.ModuleGap * (Settings.CompactMode ? .68 : 1) / 2, 0, 0, 0);
+            }
             visibleAfter |= visible;
         }
     }
@@ -851,11 +1061,26 @@ public partial class OverlayWindow : Window
             _glowWindow.UpdateBounds(PanelSurface, PanelScale.ScaleX);
     }
 
+    private void UpdateThemeCornerRadius()
+    {
+        if (_activeTheme is not { } theme || theme.Layout == "cards") return;
+        var radius = theme.CornerRadius * (Settings.CompactMode ? .68 : 1);
+        if (PanelSurface.ActualWidth > 0 && PanelSurface.ActualHeight > 0)
+            radius = Math.Min(radius, Math.Min(PanelSurface.ActualWidth, PanelSurface.ActualHeight) / 2);
+        // WPF independently squeezes oversized X/Y radii into ellipses. Bound the
+        // uniform radius first so the panel border and cached glow share one shape.
+        PanelSurface.CornerRadius = new CornerRadius(radius);
+        MusicGlow.CornerRadius = radius;
+        if (_glowWindow is { } glow) glow.Surface.CornerRadius = radius;
+    }
+
     private void ConfigureGlow()
     {
         if (_closing) return;
-        var active = Settings.GlowEnabled && Settings.GlowIntensity > 0
+        UpdateThemeCornerRadius();
+        var active = Settings.GlowEnabled && Settings.GlowIntensity > 0 && _activeTheme?.Layout != "cards"
             && (!_initializeServices || IsVisible);
+        MusicGlow.CornerRadius = _activeTheme is null ? double.NaN : PanelSurface.CornerRadius.TopLeft;
         MusicGlow.Layer = _initializeServices ? Controls.GlowLayer.Inner : Controls.GlowLayer.Both;
         MusicGlow.Visibility = Visible(active);
         if (_initializeServices)
@@ -864,6 +1089,7 @@ public partial class OverlayWindow : Window
             {
                 _glowWindow ??= new Controls.ReactiveGlowWindow(this);
                 _glowWindow.Surface.Layer = Controls.GlowLayer.Outer;
+                _glowWindow.Surface.CornerRadius = MusicGlow.CornerRadius;
                 // A popup must retain its z-order while open. The halo needs no
                 // repeated HWND_TOPMOST positioning behind an unchanged panel.
                 if (!IsMenuOpen)
@@ -911,7 +1137,7 @@ public partial class OverlayWindow : Window
 
     private void UpdateGlowFrame()
     {
-        if (_closing || !Settings.GlowEnabled || Settings.GlowIntensity <= 0 || !IsVisible)
+        if (_closing || !Settings.GlowEnabled || Settings.GlowIntensity <= 0 || _activeTheme?.Layout == "cards" || !IsVisible)
         {
             ConfigureGlow();
             return;
@@ -955,10 +1181,14 @@ public partial class OverlayWindow : Window
             || MusicSection.ActualWidth <= 0 || PanelSurface.ActualHeight <= 0) return;
         try
         {
-            var left = MusicSection.PointToScreen(new Point(0, 0));
-            var right = MusicSection.PointToScreen(new Point(MusicSection.ActualWidth, 0));
-            var top = PanelSurface.PointToScreen(new Point(0, 0));
-            var bottom = PanelSurface.PointToScreen(new Point(0, PanelSurface.ActualHeight));
+            var region = _activeTheme is not null && _themeModuleFrames.TryGetValue("music", out var musicFrame)
+                ? (FrameworkElement)musicFrame : MusicSection;
+            var left = region.PointToScreen(new Point(0, 0));
+            var right = region.PointToScreen(new Point(region.ActualWidth, 0));
+            // A vertical theme must not capture the wheel over unrelated modules below the player.
+            var verticalBounds = _activeTheme is not null ? region : PanelSurface;
+            var top = verticalBounds.PointToScreen(new Point(0, 0));
+            var bottom = verticalBounds.PointToScreen(new Point(0, verticalBounds.ActualHeight));
             _wheel.Region = new Rect(new Point(left.X, top.Y), new Point(right.X, bottom.Y));
             _wheel.Active = true;
         }

@@ -19,7 +19,7 @@
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value><ControlTemplate TargetType="Button">
-                    <Border x:Name="ButtonSurface" Background="{TemplateBinding Background}" CornerRadius="12" Padding="{TemplateBinding Padding}">
+                    <Border x:Name="ButtonSurface" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource ThemeButtonCornerRadius}" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -53,7 +53,7 @@
         <controls:ReactiveGlowSurface x:Name="MusicGlow" Layer="Inner" Visibility="Collapsed" IsHitTestVisible="False"/>
         <Border x:Name="PanelSurface" CornerRadius="34" BorderThickness="1" BorderBrush="{DynamicResource AccentPanelBorderBrush}" Background="{DynamicResource OverlayBackgroundBrush}">
             <Grid x:Name="PanelContent" Margin="24,8" Height="50">
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel x:Name="ModuleHost" Orientation="Horizontal" VerticalAlignment="Center">
                     <StackPanel x:Name="MusicSection" Orientation="Horizontal" VerticalAlignment="Center">
                         <Border x:Name="ArtworkFrame" Width="48" Height="48" CornerRadius="12" Background="{DynamicResource AccentCoverBrush}" BorderBrush="{DynamicResource AccentCoverBorderBrush}" BorderThickness="1">
                             <Grid Width="46" Height="46">
@@ -145,6 +145,7 @@
                             </StackPanel>
                             </StackPanel>
                         </StackPanel>
+                        <Border x:Name="NetworkDivider" Style="{StaticResource Divider}" Visibility="Collapsed"/>
                     </StackPanel>
                 </StackPanel>
             </Grid>

@@ -45,6 +45,7 @@ public sealed class ReactiveGlowSurface : FrameworkElement
     private Size _rasterSize;
     private GlowLayer _rasterLayer;
     private double _rasterScale;
+    private double _rasterCornerRadius = double.NaN;
     private FrameKey? _lastFrame;
 
     // The wave has its own palette, independent of the UI accent.
@@ -74,6 +75,11 @@ public sealed class ReactiveGlowSurface : FrameworkElement
     public static readonly DependencyProperty PulsePositionProperty = DependencyProperty.Register(
         nameof(PulsePosition), typeof(double), typeof(ReactiveGlowSurface),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender, null, NormalizePhase));
+    // NaN keeps the historical capsule. An explicit radius is used by data-only HUD themes.
+    public static readonly DependencyProperty CornerRadiusProperty = DependencyProperty.Register(
+        nameof(CornerRadius), typeof(double), typeof(ReactiveGlowSurface),
+        new FrameworkPropertyMetadata(double.NaN, FrameworkPropertyMetadataOptions.AffectsRender,
+            null, (_, value) => value is double radius && double.IsFinite(radius) ? Math.Clamp(radius, 0, 1024) : double.NaN));
 
     public Color GlowColor { get => (Color)GetValue(GlowColorProperty); set => SetValue(GlowColorProperty, value); }
     public double Level { get => (double)GetValue(LevelProperty); set => SetValue(LevelProperty, value); }
@@ -83,6 +89,7 @@ public sealed class ReactiveGlowSurface : FrameworkElement
     public string EffectStyle { get => (string)GetValue(EffectStyleProperty); set => SetValue(EffectStyleProperty, value); }
     public double Pulse { get => (double)GetValue(PulseProperty); set => SetValue(PulseProperty, value); }
     public double PulsePosition { get => (double)GetValue(PulsePositionProperty); set => SetValue(PulsePositionProperty, value); }
+    public double CornerRadius { get => (double)GetValue(CornerRadiusProperty); set => SetValue(CornerRadiusProperty, value); }
 
     public ReactiveGlowSurface()
     {
@@ -223,10 +230,12 @@ public sealed class ReactiveGlowSurface : FrameworkElement
         var height = ActualHeight + padding * 2;
         scale = Math.Min(scale, Math.Sqrt(MaximumPixels / (width * height)));
         scale = Math.Min(scale, 16384 / Math.Max(width, height));
-        if (_bitmap is not null && _rasterSize == size && _rasterLayer == Layer && Math.Abs(_rasterScale - scale) < .001) return;
+        if (_bitmap is not null && _rasterSize == size && _rasterLayer == Layer && Math.Abs(_rasterScale - scale) < .001
+            && _rasterCornerRadius.Equals(CornerRadius)) return;
         _rasterSize = size;
         _rasterLayer = Layer;
         _rasterScale = scale;
+        _rasterCornerRadius = CornerRadius;
         var pixelWidth = Math.Max(1, (int)Math.Ceiling(width * scale));
         var pixelHeight = Math.Max(1, (int)Math.Ceiling(height * scale));
         _bitmap = new WriteableBitmap(pixelWidth, pixelHeight, 96 * scale, 96 * scale, PixelFormats.Pbgra32, null);
@@ -234,7 +243,8 @@ public sealed class ReactiveGlowSurface : FrameworkElement
         _rasterBounds = new Rect(-padding, -padding, pixelWidth / scale, pixelHeight / scale);
         _lastFrame = null;
         var capsule = new Rect(.5, .5, ActualWidth - 1, ActualHeight - 1);
-        var radius = Math.Min(capsule.Width, capsule.Height) / 2;
+        var innerDepth = Math.Min(capsule.Width, capsule.Height) / 2;
+        var radius = double.IsNaN(CornerRadius) ? innerDepth : Math.Min(CornerRadius, innerDepth);
         var horizontal = capsule.Width - 2 * radius;
         var vertical = capsule.Height - 2 * radius;
         var perimeter = 2 * (horizontal + vertical) + Math.PI * 2 * radius;
@@ -252,7 +262,10 @@ public sealed class ReactiveGlowSurface : FrameworkElement
                 var cy = Math.Clamp(py, capsule.Top + radius, capsule.Bottom - radius);
                 var dx = px - cx;
                 var dy = py - cy;
-                var distance = Math.Sqrt(dx * dx + dy * dy) - radius;
+                var qx = Math.Abs(px - (capsule.Left + capsule.Width / 2)) - capsule.Width / 2 + radius;
+                var qy = Math.Abs(py - (capsule.Top + capsule.Height / 2)) - capsule.Height / 2 + radius;
+                var distance = Math.Sqrt(Math.Pow(Math.Max(qx, 0), 2) + Math.Pow(Math.Max(qy, 0), 2))
+                    + Math.Min(Math.Max(qx, qy), 0) - radius;
                 var inside = includeInner && distance < halfPixel;
                 var outside = includeOuter && distance > -halfPixel && distance < 22 + halfPixel;
                 if (!inside && !outside) continue;
@@ -269,9 +282,9 @@ public sealed class ReactiveGlowSurface : FrameworkElement
                 void Add(bool inner, double depth, double coverage)
                 {
                     var normalized = Math.Max(0, depth);
-                    var maskIndex = inner ? Math.Clamp((int)Math.Round(normalized / radius * InsideSteps), 0, InsideSteps)
+                    var maskIndex = inner ? Math.Clamp((int)Math.Round(normalized / innerDepth * InsideSteps), 0, InsideSteps)
                         : Math.Clamp((int)Math.Round(normalized * DepthSteps), 0, 22 * DepthSteps);
-                    var (ring, boost) = BandAlpha(normalized, halfPixel, inner, radius);
+                    var (ring, boost) = BandAlpha(normalized, halfPixel, inner, innerDepth);
                     var coreWidth = inner ? .8 : 1.4;
                     var core = Math.Clamp((coreWidth - normalized) * scale + .5, 0, 1);
                     map.Add(new RasterPixel(y * pixelWidth + x, color, wash, (ushort)maskIndex, inner,

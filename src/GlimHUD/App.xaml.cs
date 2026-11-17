@@ -24,14 +24,16 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        if (e.Args.Length >= 2 && e.Args[0] is "--render-preview" or "--smoke-test")
+        if (e.Args.Length >= 2 && e.Args[0] is "--render-preview" or "--smoke-test" or "--theme-smoke")
         {
             var outputPath = Path.GetFullPath(e.Args[1]);
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-                Environment.SetEnvironmentVariable("GLIMHUD_DATA_DIR", Path.Combine(Path.GetDirectoryName(outputPath)!, "diagnostic-settings"));
+                Environment.SetEnvironmentVariable("GLIMHUD_DATA_DIR", Path.Combine(Path.GetDirectoryName(outputPath)!,
+                    "diagnostic-settings-" + Guid.NewGuid().ToString("N")));
                 if (e.Args[0] == "--render-preview") RenderPreview(outputPath, e.Args.ElementAtOrDefault(2), e.Args.ElementAtOrDefault(3));
+                else if (e.Args[0] == "--theme-smoke") RunThemeSmokeTest(outputPath);
                 else await RunSmokeTestAsync(outputPath);
                 Shutdown(0);
             }
@@ -88,13 +90,16 @@ public partial class App : System.Windows.Application
     private static void RenderPreview(string outputPath, string? variant = null, string? language = null)
     {
         var overlay = new OverlayWindow(false);
+        // A render fixture must not inherit a theme left by another diagnostic run.
+        overlay.Settings.Theme = null;
         overlay.Settings.Language = L10n.NormalizeLanguage(language);
         overlay.Settings.BackgroundOpacity = .30;
         overlay.Settings.Scale = 1;
         overlay.Settings.TextColor = "#F2F8FC";
         overlay.Settings.BackgroundColor = "#07121D";
         overlay.Settings.CompactMode = variant is "slim" or "slim-neon" or "slim-network" or "slim-stress" or "slim-no-music";
-        var networkPreview = variant is "network" or "network-neon" or "network-only" or "network-idle" or "slim-network" or "slim-stress";
+        var themePreview = variant?.StartsWith("theme-", StringComparison.Ordinal) == true;
+        var networkPreview = themePreview || variant is "network" or "network-neon" or "network-only" or "network-idle" or "slim-network" or "slim-stress";
         var neonPreview = variant is "neon" or "neon-low" or "neon-pulse" or "compact-neon" or "neon-light" or "network-neon" or "slim-neon";
         overlay.Settings.GlowEnabled = neonPreview || variant is "glow" or "glow-low" or "glow-peak" or "compact-glow" or "glow-light";
         overlay.Settings.GlowStyle = neonPreview ? Models.GlowStyles.NeonFlow : Models.GlowStyles.RainbowWave;
@@ -119,6 +124,13 @@ public partial class App : System.Windows.Application
         }
         overlay.Settings.UseWindowsAccent = !Services.AccentThemeService.TryParseHex(variant, out _);
         if (!overlay.Settings.UseWindowsAccent) overlay.Settings.CustomAccentColor = variant!;
+        if (themePreview)
+        {
+            var themeId = variant![6..];
+            var stress = themeId.EndsWith("-stress", StringComparison.Ordinal);
+            if (stress) themeId = themeId[..^7];
+            Services.HudThemeCatalog.Apply(overlay.Settings, Services.HudThemeCatalog.GetPreset(themeId));
+        }
         overlay.ApplySettings();
         // Explicit design preview only; live mode always uses service measurements.
         if (overlay.Settings.GlowEnabled)
@@ -142,7 +154,7 @@ public partial class App : System.Windows.Application
         if (networkPreview) overlay.SetNetworkPreview(CreateNetworkPreview(variant == "network-idle"));
         if (variant is "cpu-driver-missing" or "cpu-access-denied")
             overlay.SetTelemetryPreview(CreateCpuTemperaturePreview(variant == "cpu-access-denied"));
-        if (variant == "slim-stress")
+        if (variant == "slim-stress" || themePreview && variant!.EndsWith("-stress", StringComparison.Ordinal))
         {
             overlay.TrackTitle.Text = "A very long track title that must remain inside its column";
             overlay.TrackArtist.Text = "An artist with a similarly long name";
@@ -186,25 +198,34 @@ public partial class App : System.Windows.Application
 
         var scene = new DrawingVisual();
         var width = image.PixelWidth + 64;
+        var sceneHalfHeight = Math.Max(150, image.PixelHeight + 64);
+        var sceneHeight = sceneHalfHeight * 2;
         using (var drawing = scene.RenderOpen())
         {
-            drawing.DrawRectangle(new LinearGradientBrush(Color.FromRgb(10, 24, 42), Color.FromRgb(71, 98, 119), 0), null, new Rect(0, 0, width, 150));
-            drawing.DrawRectangle(new LinearGradientBrush(Color.FromRgb(155, 183, 199), Color.FromRgb(66, 100, 121), 0), null, new Rect(0, 150, width, 150));
+            drawing.DrawRectangle(new LinearGradientBrush(Color.FromRgb(10, 24, 42), Color.FromRgb(71, 98, 119), 0), null, new Rect(0, 0, width, sceneHalfHeight));
+            drawing.DrawRectangle(new LinearGradientBrush(Color.FromRgb(155, 183, 199), Color.FromRgb(66, 100, 121), 0), null, new Rect(0, sceneHalfHeight, width, sceneHalfHeight));
             for (var x = 0; x < width; x += 80)
             {
-                drawing.DrawRectangle(new SolidColorBrush(Color.FromArgb(45, 188, 225, 239)), null, new Rect(x, 0, 27, 300));
-                drawing.DrawLine(new Pen(new SolidColorBrush(Color.FromArgb(35, 255, 255, 255)), 1), new Point(x, 0), new Point(x + 130, 300));
+                drawing.DrawRectangle(new SolidColorBrush(Color.FromArgb(45, 188, 225, 239)), null, new Rect(x, 0, 27, sceneHeight));
+                drawing.DrawLine(new Pen(new SolidColorBrush(Color.FromArgb(35, 255, 255, 255)), 1), new Point(x, 0), new Point(x + 130, sceneHeight));
             }
-            drawing.DrawImage(image, new Rect(32, 42, image.PixelWidth, image.PixelHeight));
-            drawing.DrawImage(image, new Rect(32, 192, image.PixelWidth, image.PixelHeight));
+            var imageTop = (sceneHalfHeight - image.PixelHeight) / 2d;
+            drawing.DrawImage(image, new Rect(32, imageTop, image.PixelWidth, image.PixelHeight));
+            drawing.DrawImage(image, new Rect(32, imageTop + sceneHalfHeight, image.PixelWidth, image.PixelHeight));
         }
-        var comparison = new RenderTargetBitmap(width, 300, 96, 96, PixelFormats.Pbgra32);
+        var comparison = new RenderTargetBitmap(width, sceneHeight, 96, 96, PixelFormats.Pbgra32);
         comparison.Render(scene);
         SavePng(comparison, Path.ChangeExtension(outputPath, ".backgrounds.png"));
 
         var settings = new SettingsWindow(overlay);
         var settingsContent = (FrameworkElement)settings.Content;
-        if (networkPreview)
+        if (themePreview && settings.FindName("ThemesCard") is FrameworkElement themeCard)
+        {
+            RenderElement(settingsContent, new Size(640, 790));
+            themeCard.BringIntoView();
+            settingsContent.UpdateLayout();
+        }
+        else if (networkPreview)
         {
             RenderElement(settingsContent, new Size(640, 790));
             settings.NetworkCard.BringIntoView();
@@ -239,6 +260,292 @@ public partial class App : System.Windows.Application
         SavePng(RenderElement(settingsContent, new Size(640, 790)), Path.ChangeExtension(outputPath, ".settings.png"));
         settings.Close();
         overlay.Close();
+    }
+
+    private static void RunThemeSmokeTest(string outputPath)
+    {
+        // Pure presentation fixtures: no HWND hooks, sensor sampling, media commands,
+        // update checks, elevation requests, or changes to the user's settings.
+        var preview = new OverlayWindow(initializeServices: false, allowWheelInterception: false,
+            allowHotkeyRegistration: false, allowUpdateChecks: false);
+        var reports = new List<object>();
+        var pictures = new List<(string Label, BitmapSource Image)>();
+        var directory = Path.GetDirectoryName(outputPath)!;
+        var assertions = 0;
+        void Require(bool condition, string message)
+        {
+            assertions++;
+            if (!condition) throw new InvalidOperationException("Theme presentation: " + message);
+        }
+        try
+        {
+            preview.Settings.Theme = null;
+            preview.Settings.Scale = 1;
+            preview.Settings.GlowEnabled = false;
+            preview.Settings.CompactMode = false;
+            preview.Settings.UseWindowsAccent = false;
+            preview.Settings.CustomAccentColor = "#65DDF2";
+            preview.Settings.Language = "en";
+            preview.Settings.ShowMusic = preview.Settings.ShowFps = preview.Settings.ShowCpu
+                = preview.Settings.ShowGpu = preview.Settings.ShowRam = preview.Settings.ShowNetwork = true;
+            preview.ApplySettings();
+            SetThemePreviewValues(preview);
+            var content = (FrameworkElement)preview.Content;
+            var legacy = Services.HudThemeCatalog.Resolve(preview.Settings);
+            var regular = RenderElement(content);
+            var legacySize = content.DesiredSize;
+            var musicVolume = preview.Settings.ScrollMusicVolume;
+            var elevated = preview.Settings.RequestAdministratorOnStartup;
+            var updateChecks = preview.Settings.CheckForUpdates;
+            var modules = new Dictionary<string, FrameworkElement>
+            {
+                ["music"] = preview.MusicSection, ["fps"] = preview.FpsSection,
+                ["cpu"] = preview.CpuSection, ["gpu"] = preview.GpuSection,
+                ["ram"] = preview.RamSection, ["network"] = preview.NetworkSection
+            };
+            foreach (var language in new[] { "en", "ru" })
+            foreach (var id in new[] { "classic", "capsule", "slate", "terminal", "paper" })
+            foreach (var compact in new[] { false, true })
+            {
+                var name = $"{id}-{language}-{(compact ? "compact" : "regular")}";
+                preview.Settings.Language = language;
+                Services.HudThemeCatalog.Apply(preview.Settings, Services.HudThemeCatalog.GetPreset(id));
+                preview.Settings.CompactMode = compact;
+                preview.ApplySettings();
+                SetThemePreviewValues(preview);
+                var theme = Services.HudThemeCatalog.Resolve(preview.Settings);
+                var image = RenderElement(content);
+                Require(content.DesiredSize.Width is > 0 and < 4096
+                    && content.DesiredSize.Height is > 0 and < 4096, name + " has bounded nonempty dimensions.");
+                Require(preview.Settings.ScrollMusicVolume == musicVolume
+                    && preview.Settings.RequestAdministratorOnStartup == elevated
+                    && preview.Settings.CheckForUpdates == updateChecks, name + " preserves volume, startup, and update preferences.");
+                Require(preview.PlayButton.Visibility == Visibility.Visible
+                    && preview.PlayButton.ActualWidth > 0 && preview.PlayButton.ActualHeight > 0,
+                    name + " retains the playback action.");
+                var circle = preview.PlaybackCircle.TransformToAncestor(preview.PlayButton)
+                    .TransformBounds(new Rect(preview.PlaybackCircle.RenderSize));
+                Require(new Rect(preview.PlayButton.RenderSize).Contains(circle), name + " playback button contains its glyph.");
+                foreach (var block in new[] { preview.FpsValue, preview.CpuValue, preview.GpuValue,
+                    preview.RamValue, preview.CpuTemperature, preview.GpuTemperature, preview.RamMemory,
+                    preview.VolumeValue, preview.NetworkDownloadValue, preview.NetworkUploadValue })
+                {
+                    if (!IsThemeElementRendered(block, content)) continue;
+                    var text = new FormattedText(block.Text, L10n.Culture, block.FlowDirection,
+                        new Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch),
+                        block.FontSize, block.Foreground, 1);
+                    Require(text.WidthIncludingTrailingWhitespace <= block.ActualWidth + 1.5,
+                        $"{name} {block.Name} fits its numeric value ({text.WidthIncludingTrailingWhitespace:F1}/{block.ActualWidth:F1}).");
+                    Require(text.Height <= block.ActualHeight + 2,
+                        $"{name} {block.Name} fits its text height ({text.Height:F1}/{block.ActualHeight:F1}).");
+                    var module = modules.First(pair => IsThemeDescendantOf(block, pair.Value)).Value;
+                    var bounds = block.TransformToAncestor(module)
+                        .TransformBounds(new Rect(block.RenderSize));
+                    Require(bounds.X >= -1 && bounds.Y >= -1 && bounds.Right <= module.ActualWidth + 1
+                        && bounds.Bottom <= module.ActualHeight + 1, name + " values remain within their module.");
+                }
+                var visible = theme.ModuleOrder.Select(moduleId => modules[moduleId]).Where(item => item.Visibility == Visibility.Visible).ToArray();
+                for (var index = 1; index < visible.Length; index++)
+                {
+                    var previousBounds = visible[index - 1].TransformToAncestor(content)
+                        .TransformBounds(new Rect(visible[index - 1].RenderSize));
+                    var nextBounds = visible[index].TransformToAncestor(content)
+                        .TransformBounds(new Rect(visible[index].RenderSize));
+                    Require(theme.Orientation == "vertical"
+                        ? nextBounds.Top >= previousBounds.Bottom - 1
+                        : nextBounds.Left >= previousBounds.Right - 1, name + " applies ordered modules without overlap.");
+                }
+                SavePng(image, Path.Combine(directory, name + ".png"));
+                if (language == "en") pictures.Add(($"{id} / {(compact ? "compact" : "regular")}", image));
+                reports.Add(new { Theme = id, Language = language, Compact = compact,
+                    Width = image.PixelWidth, Height = image.PixelHeight, theme.Layout, theme.Orientation });
+            }
+            // Exercise a theme with a nondefault order and both layout directions on
+            // the same live control tree, rather than only creating fresh windows.
+            foreach (var orientation in new[] { "horizontal", "vertical" })
+            {
+                var reordered = Services.HudThemeCatalog.GetPreset("slate");
+                reordered.Orientation = orientation;
+                reordered.ModuleOrder = ["network", "ram", "gpu", "cpu", "fps", "music"];
+                Services.HudThemeCatalog.Apply(preview.Settings, reordered);
+                preview.Settings.CompactMode = false;
+                preview.ApplySettings();
+                SetThemePreviewValues(preview);
+                RenderElement(content);
+                var first = preview.NetworkSection.TransformToAncestor(content).Transform(new Point());
+                var last = preview.MusicSection.TransformToAncestor(content).Transform(new Point());
+                Require(orientation == "horizontal" ? first.X < last.X : first.Y < last.Y,
+                    "Switching direction retains a reversed module order.");
+                preview.Settings.ShowCpu = preview.Settings.ShowGpu = false;
+                preview.ApplySettings();
+                RenderElement(content);
+                Require(preview.CpuSection.Visibility == Visibility.Collapsed
+                    && preview.GpuSection.Visibility == Visibility.Collapsed, "A theme preserves user-hidden modules.");
+                var host = preview.FindName("ModuleHost") as StackPanel;
+                Require(host is not null, "The live module host is present.");
+                var hiddenFrames = host!.Children.OfType<Border>().Where(border => border.Tag is "cpu" or "gpu").ToArray();
+                Require(hiddenFrames.Length == 2, "Each hidden module retains exactly one reusable card.");
+                foreach (var hidden in hiddenFrames)
+                    Require(hidden.Visibility == Visibility.Collapsed, "Hidden cards do not leave empty gaps.");
+                preview.Settings.ShowCpu = preview.Settings.ShowGpu = true;
+            }
+            var editor = new SettingsWindow(preview);
+            try
+            {
+                foreach (var language in new[] { "en", "ru" })
+                {
+                    editor.LanguageCombo.SelectedValue = language;
+                    editor.ThemeCombo.SelectedValue = "paper";
+                    Require(preview.Settings.Theme?.Id == "paper"
+                        && editor.BackgroundColorHexBox.Text == "#F8EEDC"
+                        && editor.TextColorHexBox.Text == "#272A31", "Preset selection synchronizes existing palette controls.");
+                    editor.ThemeRadiusSlider.Value = 0;
+                    Require(preview.Settings.Theme?.Id == "custom" && preview.PanelSurface.CornerRadius.TopLeft == 0,
+                        "A geometry edit becomes a custom theme and updates the live panel.");
+                    editor.ThemeNameBox.Text = "QA theme " + language;
+                    editor.ThemeHeightSlider.Value = 28;
+                    editor.ThemePaddingHorizontalSlider.Value = 0;
+                    editor.ThemePaddingVerticalSlider.Value = 0;
+                    editor.ThemeGapSlider.Value = 0;
+                    editor.ThemeBorderSlider.Value = 4;
+                    Require(preview.Settings.Theme?.Name == "QA theme " + language
+                        && (string?)editor.ThemeCombo.SelectedValue == "custom",
+                        "A custom theme retains its edited name and selection.");
+                    editor.ThemeLayoutCombo.SelectedValue = "cards";
+                    editor.ThemeOrientationCombo.SelectedValue = "vertical";
+                    editor.ThemeFontCombo.SelectedValue = "Consolas";
+                    editor.ThemeValueSizeSlider.Value = 32;
+                    editor.ThemeLabelSizeSlider.Value = 16;
+                    editor.ThemeSecondarySizeSlider.Value = 20;
+                    editor.ThemeLabelsCheck.IsChecked = false;
+                    editor.ThemeIconsCheck.IsChecked = false;
+                    editor.ThemeArtworkCheck.IsChecked = false;
+                    editor.ThemeVolumeCheck.IsChecked = false;
+                    SetThemePreviewValues(preview);
+                    var editorImage = RenderElement(content);
+                    Require(preview.ModuleHost.Orientation == Orientation.Vertical
+                        && preview.PanelSurface.BorderThickness.Left == 0
+                        && preview.FontFamily.Source == "Consolas", "Layout direction, cards, and font edits reach the HUD.");
+                    Require(preview.CpuLabel.Visibility == Visibility.Collapsed
+                        && preview.NetworkLabel.Visibility == Visibility.Collapsed
+                        && preview.CpuIcon.Visibility == Visibility.Collapsed
+                        && preview.ArtworkFrame.Visibility == Visibility.Collapsed
+                        && preview.VolumeSlider.Visibility == Visibility.Collapsed
+                        && preview.PlayButton.Visibility == Visibility.Visible, "Optional decoration hides while playback remains available.");
+                    foreach (var block in new[] { preview.FpsValue, preview.CpuValue, preview.RamValue,
+                        preview.CpuTemperature, preview.RamMemory, preview.NetworkDownloadValue })
+                    {
+                        var text = new FormattedText(block.Text, L10n.Culture, block.FlowDirection,
+                            new Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch),
+                            block.FontSize, block.Foreground, 1);
+                        Require(text.WidthIncludingTrailingWhitespace <= block.ActualWidth + 1.5
+                            && text.Height <= block.ActualHeight + 2, "Largest editable fonts fit numeric columns.");
+                    }
+                    editor.ThemeModuleOrderList.SelectedIndex = 5;
+                    editor.ThemeModuleUpButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Require(Services.HudThemeCatalog.Resolve(preview.Settings).ModuleOrder[4] == "network",
+                        "Moving a selected module updates the saved order.");
+                    editor.CompactModeCheck.IsChecked = true;
+                    var compactEditorImage = RenderElement(content);
+                    Require(compactEditorImage.PixelHeight < editorImage.PixelHeight,
+                        "Compact mode also reduces an edited vertical theme.");
+                    editor.CompactModeCheck.IsChecked = false;
+                    editor.TextColorHexBox.Text = "#E8EFDD";
+                    var exported = Services.HudThemeCatalog.Import(Services.HudThemeCatalog.Export(preview.Settings));
+                    Require(exported.TextColor == "#E8EFDD" && exported.Layout == "cards"
+                        && exported.Orientation == "vertical" && exported.ValueFontSize == 32
+                        && exported.ContentHeight == 28 && exported.PaddingHorizontal == 0
+                        && exported.PaddingVertical == 0 && exported.ModuleGap == 0 && exported.BorderThickness == 4,
+                        "Theme export contains geometry and the current palette.");
+                    preview.SaveSettings();
+                    var loaded = Services.SettingsStore.Load();
+                    Require(loaded.Theme?.FontFamily == "Consolas" && loaded.TextColor == "#E8EFDD"
+                        && !loaded.CompactMode, "The edited appearance survives a settings reload.");
+                    editor.ThemeAdvanced.IsExpanded = true;
+                    RenderElement((FrameworkElement)editor.Content, new Size(640, 790));
+                    editor.ThemesCard.BringIntoView();
+                    SavePng(RenderElement((FrameworkElement)editor.Content, new Size(640, 790)),
+                        Path.Combine(directory, $"themes-editor-{language}.png"));
+                }
+            }
+            finally { editor.Close(); }
+            // Revert the exact window used for all preceding modes to the old panel.
+            Services.HudThemeCatalog.Apply(preview.Settings, legacy);
+            preview.Settings.Theme = null;
+            preview.Settings.Language = "en";
+            preview.ApplySettings();
+            SetThemePreviewValues(preview);
+            var restored = RenderElement(content);
+            Require(content.DesiredSize == legacySize, "Returning to Classic restores legacy dimensions.");
+            var stride = regular.PixelWidth * 4;
+            var before = new byte[stride * regular.PixelHeight];
+            var after = new byte[before.Length];
+            regular.CopyPixels(before, stride, 0);
+            restored.CopyPixels(after, stride, 0);
+            Require(before.AsSpan().SequenceEqual(after), "Returning to Classic restores the exact legacy rendering.");
+            SaveThemeContactSheet(pictures, Path.Combine(directory, "themes-contact-sheet.png"));
+            File.WriteAllText(outputPath, JsonSerializer.Serialize(new
+            {
+                Success = true, Assertions = assertions, Cases = reports,
+                LegacyRestored = true, ThemeEditorExercised = true, ServicesInitialized = false,
+                HotkeyRegistrationEnabled = false, WheelInterceptionEnabled = false,
+                AutomaticUpdateChecksEnabled = false
+            }, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        finally { preview.Close(); }
+    }
+
+    private static void SetThemePreviewValues(OverlayWindow preview)
+    {
+        // Deliberately long values reveal clipped columns and compact controls.
+        preview.TrackTitle.Text = "A very long track title that must remain inside its column";
+        preview.TrackArtist.Text = "An artist with a similarly long name";
+        preview.FpsValue.Text = "999";
+        preview.CpuValue.Text = preview.GpuValue.Text = preview.RamValue.Text = "100%";
+        preview.CpuTemperature.Text = preview.GpuTemperature.Text = "100°C";
+        preview.RamMemory.Text = L10n.Text("{0:0.#}/{1:0.#} GB", "{0:0.#}/{1:0.#} ГБ", 128, 128);
+        preview.VolumeSlider.Value = 100;
+        preview.VolumeValue.Text = "100%";
+        preview.SetNetworkPreview(CreateNetworkPreview());
+    }
+
+    private static bool IsThemeElementRendered(FrameworkElement element, FrameworkElement root)
+    {
+        for (DependencyObject? item = element; item is not null; item = VisualTreeHelper.GetParent(item))
+        {
+            if (item is UIElement { Visibility: not Visibility.Visible }) return false;
+            if (ReferenceEquals(item, root)) return true;
+        }
+        return false;
+    }
+
+    private static bool IsThemeDescendantOf(DependencyObject child, DependencyObject parent)
+    {
+        for (DependencyObject? item = child; item is not null; item = VisualTreeHelper.GetParent(item))
+            if (ReferenceEquals(item, parent)) return true;
+        return false;
+    }
+
+    private static void SaveThemeContactSheet(IReadOnlyList<(string Label, BitmapSource Image)> pictures, string path)
+    {
+        var width = Math.Max(700, pictures.Max(item => item.Image.PixelWidth) + 48);
+        var height = pictures.Sum(item => item.Image.PixelHeight + 64) + 24;
+        var visual = new DrawingVisual();
+        using (var drawing = visual.RenderOpen())
+        {
+            drawing.DrawRectangle(new SolidColorBrush(Color.FromRgb(20, 27, 37)), null, new Rect(0, 0, width, height));
+            double top = 24;
+            foreach (var (label, image) in pictures)
+            {
+                drawing.DrawText(new FormattedText(label, System.Globalization.CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight, new Typeface("Segoe UI"), 14, Brushes.White, 1), new Point(24, top));
+                drawing.DrawImage(image, new Rect(24, top + 28, image.PixelWidth, image.PixelHeight));
+                top += image.PixelHeight + 64;
+            }
+        }
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        SavePng(bitmap, path);
     }
 
     private static Models.NetworkSnapshot CreateNetworkPreview(bool idle = false)

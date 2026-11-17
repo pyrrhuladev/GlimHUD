@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0 - 2026-11-18
+
+### Added
+
+- A saved theme system with Classic, Capsule, Slate, Terminal, and Paper presets. Themes control panel geometry, a shared bar or separate module cards, horizontal or vertical layout, module order, spacing, borders, typography, and optional artwork, icons, labels, and volume slider.
+- Live theme selection and editing in Settings, with a preview, preset reset, and JSON import/export. Existing color, opacity, compact-mode, and glow controls remain part of the exported theme.
+- Versioned, bounded, data-only theme files. Importing a theme preserves device selections, enabled modules, position, shortcuts, update preferences, and administrator settings.
+
+### Changed
+
+- Existing settings keep their previous appearance until a theme is selected. Switching layouts restores the previous panel controls without restarting GlimHUD.
+- Unified panels reuse the cached glow renderer with the selected corner radius. Separate cards omit the single-panel glow envelope.
+
 ## 0.9.1 - 2026-11-14
 
 ### Fixed
